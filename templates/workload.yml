@@ -1,0 +1,403 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: "Workload template to deploy Meter data analytics platform in an existing VPC. (qs-1r18anahd)"
+Conditions:
+  UsingDefaultBucket: !Equals [!Ref QSS3BucketName, 'aws-quickstart-cn-northwest-1-aaron']
+Rules:
+  LZS3BucketNameProvided:
+    RuleCondition: !Equals [!Ref CreateLandingZoneS3Bucket, 'No']
+    Assertions:
+      - Assert: !Not [!Equals [!Ref LandingZoneS3BucketName, '']]
+        AssertDescription: Must provide a value for 'Landing Zone S3Bucket Name' when value of 'Create Landing Zone S3Bucket' is NO.
+
+Resources:
+    WorkflowStateTopic:
+      Type: AWS::SNS::Topic
+
+    RedshiftStack:
+      Type: 'AWS::CloudFormation::Stack'
+      Properties:
+        TemplateURL: !Sub
+          - 'https://${S3Bucket}.s3.${AWS::Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/redshift.yml'
+          - S3Region:
+              !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+            S3Bucket: !Ref QSS3BucketName
+              # !If [
+              #   UsingDefaultBucket,
+              #   !Sub '${QSS3BucketName}-${AWS::Region}-aaron',
+              #   !Ref QSS3BucketName,
+              # ]
+        Parameters:
+          MasterUsername: !Ref MasterUsername
+          MasterUserPassword: !Ref MasterUserPassword
+          Subnet1ID: !Ref Subnet1ID
+          Subnet2ID: !Ref Subnet2ID
+          VPCID: !Ref VPCID
+          RemoteAccessCIDR: !Ref RemoteAccessCIDR
+          ClusterName: !Ref ClusterName
+          DBName: !Ref DBName
+
+    CopyScriptsStack:
+      Type: 'AWS::CloudFormation::Stack'
+      Properties:
+        TemplateURL: !Sub
+          - 'https://${S3Bucket}.s3.${AWS::Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/copy-scripts.yml'
+          - S3Region:
+              !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+            S3Bucket: !Ref QSS3BucketName
+              # !If [
+              #   UsingDefaultBucket,
+              #   !Sub '${QSS3BucketName}-${AWS::Region}-aaron',
+              #   !Ref QSS3BucketName,
+              # ]
+        Parameters:
+          QSS3BucketName: !Ref QSS3BucketName
+          QSS3KeyPrefix: !Ref QSS3KeyPrefix
+
+    GlueStack:
+      Type: 'AWS::CloudFormation::Stack'
+      Properties:
+        TemplateURL: !Sub
+          - 'https://${S3Bucket}.s3.${AWS::Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/glue.yml'
+          - S3Region:
+              !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+            S3Bucket: !Ref QSS3BucketName
+              # !If [
+              #   UsingDefaultBucket,
+              #   !Sub '${QSS3BucketName}-${AWS::Region}-aaron',
+              #   !Ref QSS3BucketName,
+              # ]
+        Parameters:
+          MasterUsername: !Ref MasterUsername
+          MasterUserPassword: !Ref MasterUserPassword
+          RedshiftClusterEndpoint: !GetAtt RedshiftStack.Outputs.RedshiftClusterEndpoint
+          RedshiftSecurityGroupId: !GetAtt RedshiftStack.Outputs.RedshiftSecurityGroupId
+          RedshiftPort: !Ref RedshiftPort
+          ClusterName: !Ref ClusterName
+          DBName: !Ref DBName
+          Subnet1ID: !Ref Subnet1ID
+          VPCID: !Ref VPCID
+          RemoteAccessCIDR: !Ref RemoteAccessCIDR
+          GlueScriptsS3Bucket: !GetAtt CopyScriptsStack.Outputs.GlueScriptsS3Bucket
+          GlueTempS3Bucket: !GetAtt CopyScriptsStack.Outputs.GlueTempS3Bucket
+          VPCRouteTableId: !Ref VPCRouteTableId
+          AvailabilityZone: !Ref AvailabilityZone
+          LandingzoneTransformer: !Ref LandingzoneTransformer
+          CreateLandingZoneS3Bucket: !Ref CreateLandingZoneS3Bucket
+          LandingZoneS3BucketName: !Ref LandingZoneS3BucketName
+          DPU: !FindInMap [MeterCountMap, !Ref "NoOfMeters", DPU]
+          TopicArn: !Ref WorkflowStateTopic
+
+    GlueTablesStack:
+      Type: 'AWS::CloudFormation::Stack'
+      Properties:
+        TemplateURL: !Sub
+          - 'https://${S3Bucket}.s3.${AWS::Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/glue-tables.yml'
+          - S3Region:
+              !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+            S3Bucket: !Ref QSS3BucketName
+              # !If [
+              #   UsingDefaultBucket,
+              #   !Sub '${QSS3BucketName}-${AWS::Region}-aaron',
+              #   !Ref QSS3BucketName,
+              # ]
+        Parameters:
+          BusinessZoneS3Bucket: !GetAtt GlueStack.Outputs.BusinessZoneS3Bucket
+          LandingZoneS3Bucket: !GetAtt GlueStack.Outputs.LandingZoneS3Bucket
+          CleanZoneS3Bucket: !GetAtt GlueStack.Outputs.CleanZoneS3Bucket
+          DBName: !Ref DBName
+
+    PredictionStack:
+      DependsOn: GlueStack
+      Type: 'AWS::CloudFormation::Stack'
+      Properties:
+        TemplateURL: !Sub
+          - 'https://${S3Bucket}.s3.${AWS::Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/prediction/prediction.yml'
+          - S3Region:
+              !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+            S3Bucket: !Ref QSS3BucketName
+              # !If [
+              #   UsingDefaultBucket,
+              #   !Sub '${QSS3BucketName}-${AWS::Region}-aaron',
+              #   !Ref QSS3BucketName,
+              # ]
+        Parameters:
+          QSS3BucketName: !Ref QSS3BucketName
+          QSS3KeyPrefix: !Ref QSS3KeyPrefix
+          DBName: !Ref DBName
+          TopicArn: !Ref WorkflowStateTopic
+          GlueJobNameTrigger: !GetAtt GlueStack.Outputs.JobNameTransformCleanToBusiness
+          WithWeather: !Ref WithWeather
+          BusinessZoneS3Bucket: !GetAtt GlueStack.Outputs.BusinessZoneS3Bucket
+
+    PredictionApiStack:
+      Type: 'AWS::CloudFormation::Stack'
+      Properties:
+        TemplateURL: !Sub
+          - 'https://${S3Bucket}.s3.${AWS::Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/prediction/prediction-api.yml'
+          - S3Region:
+              !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+            S3Bucket: !Ref QSS3BucketName
+              # !If [
+              #   UsingDefaultBucket,
+              #   !Sub '${QSS3BucketName}-${AWS::Region}-aaron',
+              #   !Ref QSS3BucketName,
+              # ]
+        Parameters:
+          QSS3BucketName: !Ref QSS3BucketName
+          QSS3KeyPrefix: !Ref QSS3KeyPrefix
+          AthenaQueryBucket: !GetAtt PredictionStack.Outputs.AthenaQueryBucket
+          WorkingBucket: !GetAtt PredictionStack.Outputs.WorkingBucket
+          WithWeather: !Ref WithWeather
+          DBName: !Ref DBName
+          RedshiftSecret: !GetAtt RedshiftStack.Outputs.RedshiftSecret
+          Subnet1ID: !Ref Subnet1ID
+          Subnet2ID: !Ref Subnet2ID
+          VPCID: !Ref VPCID
+          RemoteAccessCIDR: !Ref RemoteAccessCIDR
+
+    CopyDemoDataStack:
+      Type: 'AWS::CloudFormation::Stack'
+      Properties:
+        TemplateURL: !Sub
+          - 'https://${S3Bucket}.s3.${AWS::Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/copy-demo-data.yml'
+          - S3Region:
+              !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+            S3Bucket: !Ref QSS3BucketName
+              # !If [
+              #   UsingDefaultBucket,
+              #   !Sub '${QSS3BucketName}-${AWS::Region}-aaron',
+              #   !Ref QSS3BucketName,
+              # ]
+        Parameters:
+          QSS3BucketName: !Ref QSS3BucketName
+          QSS3KeyPrefix: !Ref QSS3KeyPrefix
+          BusinessZoneS3Bucket: !GetAtt GlueStack.Outputs.BusinessZoneS3Bucket
+
+    SagemakerStack:
+      Type: 'AWS::CloudFormation::Stack'
+      Properties:
+        TemplateURL: !Sub
+          - 'https://${S3Bucket}.s3.${AWS::Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/prediction/sagemaker.yml'
+          - S3Region:
+              !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+            S3Bucket: !Ref QSS3BucketName
+              # !If [
+              #   UsingDefaultBucket,
+              #   !Sub '${QSS3BucketName}-${AWS::Region}-aaron',
+              #   !Ref QSS3BucketName,
+              # ]
+        Parameters:
+          QSS3BucketName: !Ref QSS3BucketName
+          QSS3KeyPrefix: !Ref QSS3KeyPrefix
+
+
+
+Mappings: 
+  MeterCountMap: 
+    "1-50000": 
+      "DPU": 100
+    "50001-and-more": 
+      "DPU": 200
+
+Outputs:
+  StackName:
+    Description: 'Stack name'
+    Value: !Sub '${AWS::StackName}'
+  RedshiftClusterEndpoint:
+    Description: Redshift cluster endpoint address with port
+    Value: !GetAtt RedshiftStack.Outputs.RedshiftClusterEndpoint
+  RedshiftEndpoint:
+    Description: Redshift endpoint address
+    Value: !GetAtt RedshiftStack.Outputs.RedshiftEndpoint
+  GlueWorkflowName:
+    Description: Glue workflow name
+    Value: !GetAtt GlueStack.Outputs.GlueWorkflow
+  LandingZoneS3Bucket:
+    Description: Landing zone S3 bucket name
+    Value: !GetAtt GlueStack.Outputs.LandingZoneS3Bucket
+  CleanZoneS3Bucket:
+    Description: Clean zone S3 bucket name
+    Value: !GetAtt GlueStack.Outputs.CleanZoneS3Bucket
+  TempWorkflowS3Bucket:
+    Description: Clean zone S3 bucket name
+    Value: !GetAtt GlueStack.Outputs.TempWorkflowS3Bucket
+  BusinessZoneS3Bucket:
+    Description: Business zone S3 bucket name
+    Value: !GetAtt GlueStack.Outputs.BusinessZoneS3Bucket
+
+Parameters:
+  MasterUsername:
+    Type: String
+    Description: Master user name for the Amazon Redshift cluster. The user name must be lowercase, begin with a letter, contain only alphanumeric characters, '_', '+', '.', '@', or '-', and be less than 128 characters.
+
+  MasterUserPassword:
+    Type: String
+    Description: Master user password for the Amazon Redshift cluster. The password must be 8 - 64 characters, contain at least one uppercase letter, at least one lowercase letter, and at least one number. It can only contain ASCII characters (ASCII codes 33-126), except ' (single quotation mark), " (double quotation mark), /, \, or @.
+    NoEcho: True
+  
+  ClusterName:
+    Type: String
+    Default: redshift-cluster-1
+    Description: Redshift cluster name
+
+  Subnet1ID:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet 1 ID to create Redshift cluster
+  
+  Subnet2ID:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet 2 ID to create Redshift cluster
+  
+  VPCID:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID to create Redshift cluster
+  
+  RemoteAccessCIDR:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: CIDR block from where access to the Redshift cluster is allowed
+
+  LandingzoneTransformer:
+    Type: String
+    Default: london
+    Description: Defines the Transformer for the input data in the Landing Zone
+    AllowedValues:
+      - default
+      - london
+  
+  CreateLandingZoneS3Bucket:
+    Type: String
+    Default: 'Yes'
+    Description: Select 'No' if you have an existing S3 bucket with raw meter data which you would like to use. Otherwise leave default value as 'Yes'. You must provide a value for 'Landing zone S3 bucket' parameter if you select 'No'.
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+  
+  LandingZoneS3BucketName:
+    Type: String
+    Default: ""
+    Description: (Conditional) You must provide a value if you select 'No' for 'Create Landing Zone bucket' parameter above.
+
+  QSS3BucketName:
+    Type: String
+    Default: aws-quickstart-cn-northwest-1-aaron
+    Description: AWS Quick Start S3 bucket name where the Quick Start assets are hosted
+  
+  QSS3KeyPrefix:
+    Type: String
+    Default: quickstart-aws-utility-meter-data-analytics-platform/
+    Description: S3 bucket key prefix for the AWS Quick Start assets
+  
+  QSS3BucketRegion:
+    Type: String
+    Default: cn-northwest-1
+    Description: AWS Region for AWS Quick Start S3 bucket
+  
+  DBName:
+    Type: String
+    Default: meter-data
+    Description: Redshift database name
+  
+  RedshiftPort:
+    Type: String
+    Default: 5439
+    Description: Redshift cluster port no.
+  
+  VPCRouteTableId:
+    Type: String
+    Description: Main route table Id associated with your VPC and Subnets
+  
+  AvailabilityZone:
+    Type: AWS::EC2::AvailabilityZone::Name
+    Description: AWS Availability Zone for Subnet 1
+  
+  NoOfMeters:
+    Type: String
+    Description: Approximate No. of meters you have in your dataset, which needs to be processed by the pipeline. This is used to configure appropriate no. of DPUs for the Glue Job.
+    AllowedValues:
+      - "1-50000"
+      - "50001-and-more"
+    Default: "1-50000"
+
+  WithWeather:
+    Type: String
+    Default: 0
+    Description: >-
+      Enables or disables the use of weather data.
+      0 = weather data won't be used
+      1 = enable weather data use
+
+Metadata:
+  QuickStartDocumentation:
+    EntrypointName: "Parameters for launching into an existing VPC"
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Redshift Cluster Configuration
+        Parameters:
+          - MasterUsername
+          - MasterUserPassword
+          - ClusterName
+          - DBName
+          - RedshiftPort
+      - Label:
+          default: Network Configuration
+        Parameters:
+          - AvailabilityZone
+          - VPCID
+          - Subnet1ID
+          - Subnet2ID
+          - RemoteAccessCIDR
+          - VPCRouteTableId
+      - Label:
+          default: 'Glue Configurations'
+        Parameters:
+          - LandingzoneTransformer
+          - CreateLandingZoneS3Bucket
+          - LandingZoneS3BucketName
+          - NoOfMeters
+          - LandingzoneTransformer
+      - Label:
+          default: 'Quick Start Configuration'
+        Parameters:
+          - QSS3BucketName
+          - QSS3KeyPrefix
+          - QSS3BucketRegion
+    ParameterLabels:
+      MasterUsername:
+        default: Master username
+      MasterUserPassword:
+        default: Master user password
+      ClusterName:
+        default: Redshift cluster name
+      RedshiftPort:
+        default: Redshift port
+      DBName:
+        default: Redshift database name
+      Subnet1ID:
+        default: Subnet 1 ID
+      Subnet2ID:
+        default: Subnet 2 ID
+      VPCID:
+        default: VPC ID
+      RemoteAccessCIDR:
+        default: Remote access CIDR block
+      VPCRouteTableId:
+        default: Route table ID
+      AvailabilityZone:
+        default: Availability Zones
+      QSS3BucketName:
+        default: Quick Start S3 Bucket name
+      QSS3KeyPrefix:
+        default: Quick Start S3 Bucket Key Prefix
+      QSS3BucketRegion:
+        default: Quick Start S3 Bucket AWS Region
+      LandingzoneTransformer:
+        default: Transformer that reads the landing zone data
+      CreateLandingZoneS3Bucket:
+        default: Create landing zone bucket
+      LandingZoneS3BucketName:
+        default: Landing zone S3 bucket
+      NoOfMeters:
+        default: No. of meters

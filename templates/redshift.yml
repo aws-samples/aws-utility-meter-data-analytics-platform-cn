@@ -1,0 +1,192 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Metadata:
+    Generator: "former2"
+Description: "Create Redshift cluster"
+Resources:    
+    RedshiftCluster:
+      Type: AWS::Redshift::Cluster
+      Properties: 
+        ClusterIdentifier: !Ref ClusterName
+        ClusterType: multi-node
+        ClusterSubnetGroupName: !Ref RedshiftClusterSubnetGroup
+        DBName: !Ref DBName
+        IamRoles: 
+          - !GetAtt MyRedshiftIAMRole.Arn
+        MasterUsername: !Ref MasterUsername
+        MasterUserPassword: !Ref MasterUserPassword
+        NodeType: dc2.large
+        NumberOfNodes: 2
+        PubliclyAccessible: false
+        VpcSecurityGroupIds: 
+          - !Ref RedshiftSecurityGroup
+        ClusterParameterGroupName: !Ref RedshiftClusterParameterGroup
+
+    RedshiftClusterSubnetGroup:
+        Type: "AWS::Redshift::ClusterSubnetGroup"
+        Properties:
+            Description: "default"
+            SubnetIds: 
+              - !Ref Subnet1ID
+              - !Ref Subnet2ID
+
+    RedshiftClusterParameterGroup:
+        Type: "AWS::Redshift::ClusterParameterGroup"
+        Properties:
+            Description: "Default parameter group for redshift-1.0"
+            ParameterGroupFamily: "redshift-1.0"
+    
+    RedshiftSecurityGroup:
+      Type: 'AWS::EC2::SecurityGroup'
+      Properties:
+        GroupDescription: Security group for Redshift cluster
+        VpcId: !Ref VPCID
+        SecurityGroupIngress:
+          - IpProtocol: tcp
+            FromPort: 5439
+            ToPort: 5439
+            CidrIp: !Ref RemoteAccessCIDR
+            Description: 'Redshift Access to VPC CIDR'
+    
+    SelfReferencingIngress:
+      Type: AWS::EC2::SecurityGroupIngress
+      Properties: 
+        Description: Self referencing security group ingress rule for redshift cluster
+        FromPort: -1
+        GroupId: !Ref RedshiftSecurityGroup
+        IpProtocol: "-1"
+        SourceSecurityGroupId: !Ref RedshiftSecurityGroup
+        ToPort: -1
+
+    MyRedshiftIAMRole:
+      Type: 'AWS::IAM::Role'
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: 'Allow'
+              Principal:
+                Service:
+                  - 'redshift.amazonaws.com'
+                  - 'glue.amazonaws.com'
+              Action:
+                - 'sts:AssumeRole'
+        Path: '/'
+        ManagedPolicyArns:
+          - arn:aws-cn:iam::aws:policy/AWSGlueConsoleFullAccess
+          - arn:aws-cn:iam::aws:policy/AmazonAthenaFullAccess
+          - arn:aws-cn:iam::aws:policy/AmazonS3ReadOnlyAccess
+        Policies:
+          - PolicyName: Spectrum-Glue-Access-Policy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: 'Allow'
+                  Action:
+                    - s3:GetBucketLocation
+                    - s3:GetObject
+                    - s3:ListMultipartUploadParts
+                    - s3:ListBucket
+                    - s3:ListBucketMultipartUploads
+                  Resource:
+                    - '*'
+                - Effect: Allow
+                  Action:
+                    - glue:CreateDatabase
+                    - glue:DeleteDatabase
+                    - glue:GetDatabase
+                    - glue:GetDatabases
+                    - glue:UpdateDatabase
+                    - glue:CreateTable
+                    - glue:DeleteTable
+                    - glue:BatchDeleteTable
+                    - glue:UpdateTable
+                    - glue:GetTable
+                    - glue:GetTables
+                    - glue:BatchCreatePartition
+                    - glue:CreatePartition
+                    - glue:DeletePartition
+                    - glue:BatchDeletePartition
+                    - glue:UpdatePartition
+                    - glue:GetPartition
+                    - glue:GetPartitions
+                    - glue:BatchGetPartition
+                    - logs:*
+                  Resource:
+                    - '*'
+
+
+    #
+    # SecretsManager
+    #
+    RedshiftSecret:
+      Type: 'AWS::SecretsManager::Secret'
+      Properties:
+        Name: redshift_db_credentials
+        Description: Redshift secret
+        SecretString: !Sub '{"username":"${MasterUsername}","password":"${MasterUserPassword}"}'
+
+    SecretRedshiftAttachment:
+      Type: "AWS::SecretsManager::SecretTargetAttachment"
+      Properties:
+        SecretId: !Ref RedshiftSecret
+        TargetId: !Ref RedshiftCluster
+        TargetType: AWS::Redshift::Cluster
+
+Outputs:
+  StackName:
+    Description: 'Stack name'
+    Value: !Sub '${AWS::StackName}'
+  RedshiftClusterEndpoint:
+    Description: Redshift cluster endpoint address with port
+    Value: !Sub '${RedshiftCluster.Endpoint.Address}:${RedshiftCluster.Endpoint.Port}'
+    Export:
+      Name: !Sub '${AWS::StackName}-RedshiftClusterEndpoint'
+  RedshiftEndpoint:
+    Description: Redshift endpoint address
+    Value: !Sub '${RedshiftCluster.Endpoint.Address}'
+    Export:
+      Name: !Sub '${AWS::StackName}-RedshiftEndpoint'
+  RedshiftPort:
+    Description: Redshift endpoint port
+    Value: !Sub '${RedshiftCluster.Endpoint.Port}'
+    Export:
+      Name: !Sub '${AWS::StackName}-RedshiftPort'
+  RedshiftCluster:
+    Description: Redshift cluser identifier
+    Value: !Sub '${RedshiftCluster}'
+    Export:
+      Name: !Sub '${AWS::StackName}-RedshiftCluster'
+  RedshiftSecurityGroupId:
+    Description: Redshifit SecurityGroupId
+    Value: !GetAtt RedshiftSecurityGroup.GroupId
+  RedshiftSecret:
+    Description: SecretManager secret reference
+    Value: !Ref RedshiftSecret
+
+Parameters:
+  MasterUsername:
+    Type: String
+
+  MasterUserPassword:
+    Type: String
+    NoEcho: True
+  
+  Subnet1ID:
+    Type: AWS::EC2::Subnet::Id
+  
+  Subnet2ID:
+    Type: AWS::EC2::Subnet::Id
+  
+  VPCID:
+    Type: AWS::EC2::VPC::Id
+  
+  RemoteAccessCIDR:
+    Type: String
+  
+  ClusterName:
+    Type: String
+    Default: redshift-cluster-1
+  
+  DBName:
+    Type: String
+    Default: meter-data

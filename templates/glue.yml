@@ -1,0 +1,755 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Creates Glue resources"
+Conditions:
+  CreateLZS3BucketCondition: !Equals [!Ref CreateLandingZoneS3Bucket, 'Yes']
+Mappings:
+  LandingzoneTransformerMap:
+    default:
+      script: "transform_raw_to_clean.py"
+    london:
+      script: "transform_raw_to_clean_london.py"
+
+Resources:
+  GlueWorkflow:
+    Type: AWS::Glue::Workflow
+    Properties:
+      Name: !Sub 'meter-data-pipeline-${AWS::Region}'
+      Description: Workflow for manufactured meter data analytics
+
+  LogsLogGroup:
+    Type: "AWS::Logs::LogGroup"
+
+  GlueCrawler:
+    Type: "AWS::Glue::Crawler"
+    Properties:
+      Name: "meter-data-business-aggregated-daily"
+      Role: !Sub "service-role/${IAMRole}"
+      Targets:
+        S3Targets:
+          -
+            Path: !Sub "s3://${BusinessZoneS3Bucket}/aggregated/daily"
+      DatabaseName: !Ref DBName
+      SchemaChangePolicy:
+        UpdateBehavior: "UPDATE_IN_DATABASE"
+        DeleteBehavior: "DEPRECATE_IN_DATABASE"
+      TablePrefix: "aggregated_"
+
+  GlueCrawler2:
+    Type: "AWS::Glue::Crawler"
+    Properties:
+      Name: "meter-data-business-aggregated-monthly"
+      Role: !Sub "service-role/${IAMRole}"
+      Targets:
+        S3Targets:
+          -
+            Path: !Sub "s3://${BusinessZoneS3Bucket}/aggregated/monthly"
+      DatabaseName: !Ref DBName
+      SchemaChangePolicy:
+        UpdateBehavior: "UPDATE_IN_DATABASE"
+        DeleteBehavior: "DEPRECATE_IN_DATABASE"
+      TablePrefix: "aggregated_"
+
+  GlueCrawler3:
+    Type: "AWS::Glue::Crawler"
+    Properties:
+      Name: "meter-data-business-aggregated-weekly"
+      Role: !Sub "service-role/${IAMRole}"
+      Targets:
+        S3Targets:
+          -
+            Path: !Sub "s3://${BusinessZoneS3Bucket}/aggregated/weekly"
+      DatabaseName: !Ref DBName
+      SchemaChangePolicy:
+        UpdateBehavior: "UPDATE_IN_DATABASE"
+        DeleteBehavior: "DEPRECATE_IN_DATABASE"
+      TablePrefix: "aggregated_"
+
+  GlueCrawler4BusinessDailyCrawler:
+    Type: "AWS::Glue::Crawler"
+    Properties:
+      Name: !Sub 'meter-data-business-daily-crawler-${AWS::Region}'
+      Role: !Sub "service-role/${IAMRole}"
+      Targets:
+        S3Targets:
+          - Path: !Sub "s3://${BusinessZoneS3Bucket}/daily"
+      DatabaseName: !Ref DBName
+      SchemaChangePolicy:
+        UpdateBehavior: "LOG"
+        DeleteBehavior: "DEPRECATE_IN_DATABASE"
+
+  GlueCrawler5CleanCrawler:
+    Type: "AWS::Glue::Crawler"
+    Properties:
+      Name: !Sub "meter-data-clean-crawler-${AWS::Region}"
+      Role: !Sub "service-role/${IAMRole}"
+      Targets:
+        S3Targets:
+          - Path: !Sub "s3://${CleanZoneS3Bucket}"
+      DatabaseName: !Ref DBName
+      SchemaChangePolicy:
+        UpdateBehavior: "LOG"
+        DeleteBehavior: "DEPRECATE_IN_DATABASE"
+
+  GlueCrawler6RawCrawler:
+    Type: "AWS::Glue::Crawler"
+    Properties:
+      Name: !Sub "meter-data-raw-crawler-${AWS::Region}"
+      Role: !Sub "service-role/${IAMRole}"
+      Targets:
+        S3Targets:
+          - Path: !If
+              - CreateLZS3BucketCondition
+              - !Sub "s3://${LandingZoneS3Bucket}"
+              - !Sub "s3://${LandingZoneS3BucketName}"
+      DatabaseName: !Ref DBName
+      SchemaChangePolicy:
+        UpdateBehavior: "UPDATE_IN_DATABASE"
+        DeleteBehavior: "DEPRECATE_IN_DATABASE"
+      Configuration: "{\"Version\":1.0,\"CrawlerOutput\":{\"Partitions\":{\"AddOrUpdateBehavior\":\"InheritFromTable\"}},\"Grouping\":{\"TableGroupingPolicy\":\"CombineCompatibleSchemas\"}}"
+
+  #
+  # Glue Jobs
+  #
+  GlueJob1AggDaily:
+    Type: "AWS::Glue::Job"
+    Properties:
+      Name: !Sub "business_aggregate_daily-${AWS::Region}"
+      Role: !GetAtt IAMRole.Arn
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
+      Command:
+        Name: "glueetl"
+        ScriptLocation: !Sub "s3://${GlueScriptsS3Bucket}/admin/business_aggregate_daily.py"
+        PythonVersion: "3"
+      DefaultArguments:
+        --TempDir: !Sub "s3://${GlueTempS3Bucket}/admin"
+        --enable-metrics: ""
+        --enable-continuous-cloudwatch-log: "true"
+        --enable-continuous-log-filter: "true"
+        --job-language: "python"
+        --enable-s3-parquet-optimized-committer : true
+        --db_name: !Ref DBName
+        --business_zone_bucket: !Ref BusinessZoneS3Bucket
+        --temp_workflow_bucket: !Ref TempWorkflowS3Bucket
+        --region: !Ref AWS::Region
+      MaxRetries: 0
+      #AllocatedCapacity: 5
+      Timeout: 2880
+      GlueVersion: "1.0"
+      MaxCapacity: !Ref DPU
+
+  GlueJob2AggMonthly:
+    Type: "AWS::Glue::Job"
+    Properties:
+      Name: !Sub "business_aggregate_monthly-${AWS::Region}"
+      Role: !GetAtt IAMRole.Arn
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
+      Command:
+        Name: "glueetl"
+        ScriptLocation: !Sub "s3://${GlueScriptsS3Bucket}/admin/business_aggregate_monthly.py"
+        PythonVersion: "3"
+      DefaultArguments:
+        --TempDir: !Sub "s3://${GlueTempS3Bucket}/admin"
+        --enable-metrics: ""
+        --enable-continuous-cloudwatch-log: "true"
+        --enable-continuous-log-filter: "true"
+        --job-language: "python"
+        --enable-s3-parquet-optimized-committer : true
+        --db_name: !Ref DBName
+        --business_zone_bucket: !Ref BusinessZoneS3Bucket
+        --temp_workflow_bucket: !Ref TempWorkflowS3Bucket
+        --region: !Ref AWS::Region
+      MaxRetries: 0
+      #AllocatedCapacity: 5
+      Timeout: 2880
+      GlueVersion: "1.0"
+      MaxCapacity: !Ref DPU
+
+  GlueJob3AggWeekly:
+    Type: "AWS::Glue::Job"
+    Properties:
+      Name: !Sub "business_aggregate_weekly-${AWS::Region}"
+      Role: !GetAtt IAMRole.Arn
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
+      Command:
+        Name: "glueetl"
+        ScriptLocation: !Sub "s3://${GlueScriptsS3Bucket}/admin/business_aggregate_weekly.py"
+        PythonVersion: "3"
+      DefaultArguments:
+        --TempDir: !Sub "s3://${GlueTempS3Bucket}/admin"
+        --enable-metrics: ""
+        --enable-continuous-cloudwatch-log: "true"
+        --enable-continuous-log-filter: "true"
+        --job-language: "python"
+        --db_name: !Ref DBName
+        --enable-s3-parquet-optimized-committer : true
+        --business_zone_bucket: !Ref BusinessZoneS3Bucket
+        --temp_workflow_bucket: !Ref TempWorkflowS3Bucket
+        --region: !Ref AWS::Region
+      MaxRetries: 0
+      #AllocatedCapacity: 5
+      Timeout: 2880
+      GlueVersion: "1.0"
+      MaxCapacity: !Ref DPU
+
+  GlueJob4BusinessDailyToRedshift:
+    Type: "AWS::Glue::Job"
+    Properties:
+      Name: !Sub "business_daily_to_redshift-${AWS::Region}"
+      Role: !GetAtt IAMRole.Arn
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
+      Command:
+        Name: "glueetl"
+        ScriptLocation: !Sub "s3://${GlueScriptsS3Bucket}/admin/business_daily_to_redshift.py"
+        PythonVersion: "3"
+      DefaultArguments:
+        --TempDir: !Sub "s3://${GlueTempS3Bucket}/admin"
+        --enable-metrics: ""
+        --enable-continuous-cloudwatch-log: "true"
+        --enable-continuous-log-filter: "true"
+        --job-bookmark-option: "job-bookmark-enable"
+        --job-language: "python"
+        --enable-s3-parquet-optimized-committer : true
+        --db_name: !Ref DBName
+        --redshift_connection: !Ref GlueConnection
+        --temp_workflow_bucket: !Ref TempWorkflowS3Bucket
+        --region: !Ref AWS::Region
+      Connections:
+        Connections:
+          - !Ref GlueConnection
+      MaxRetries: 0
+      #AllocatedCapacity: !Ref DPU
+      MaxCapacity: !Ref DPU
+      Timeout: 2880
+      GlueVersion: "1.0"
+
+  GlueJob5CleanToBusiness:
+    Type: "AWS::Glue::Job"
+    Properties:
+      Name: !Sub "transform_clean_to_business_partition-${AWS::Region}"
+      Role: !GetAtt IAMRole.Arn
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
+      Command:
+        Name: "glueetl"
+        ScriptLocation: !Sub "s3://${GlueScriptsS3Bucket}/admin/transform_clean_to_business_partition.py"
+        PythonVersion: "3"
+      DefaultArguments:
+        --TempDir: !Sub "s3://${GlueTempS3Bucket}/admin"
+        --enable-metrics: ""
+        --enable-continuous-cloudwatch-log: "true"
+        --enable-continuous-log-filter: "true"
+        --job-bookmark-option: "job-bookmark-enable"
+        --job-language: "python"
+        --enable-s3-parquet-optimized-committer : true
+        --db_name: !Ref DBName
+        --table_name: !Ref CleanZoneS3Bucket
+        --business_zone_bucket: !Ref BusinessZoneS3Bucket
+        --temp_workflow_bucket: !Ref TempWorkflowS3Bucket
+        --region: !Ref AWS::Region
+      MaxRetries: 0
+      #AllocatedCapacity: !Ref DPU
+      MaxCapacity: !Ref DPU
+      Timeout: 2880
+      GlueVersion: "1.0"
+
+  GlueJob6RawToClean:
+    Type: "AWS::Glue::Job"
+    Properties:
+      Name: !Sub "transform_raw_to_clean-${AWS::Region}"
+      Role: !GetAtt IAMRole.Arn
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
+      Command:
+        Name: "glueetl"
+        ScriptLocation: !Sub
+          - s3://${GlueScriptsS3Bucket}/admin/${script}
+          - {script: !FindInMap [LandingzoneTransformerMap, !Ref LandingzoneTransformer, "script"]}
+        PythonVersion: "3"
+      DefaultArguments:
+        --TempDir: !Sub "s3://${GlueTempS3Bucket}/admin"
+        --enable-metrics: ""
+        --enable-continuous-cloudwatch-log: "true"
+        --enable-continuous-log-filter: "true"
+        --job-bookmark-option: "job-bookmark-enable"
+        --job-language: "python"
+        --enable-s3-parquet-optimized-committer : true
+        --db_name: !Ref DBName
+        --table_name: !If
+          - CreateLZS3BucketCondition
+          - !Ref LandingZoneS3Bucket
+          - !Ref LandingZoneS3BucketName
+        --clean_data_bucket: !Ref CleanZoneS3Bucket
+        --temp_workflow_bucket: !Ref TempWorkflowS3Bucket
+        --region: !Ref AWS::Region
+      MaxRetries: 0
+      Timeout: 2880
+      GlueVersion: "1.0"
+      #AllocatedCapacity: !Ref DPU
+      MaxCapacity: !Ref DPU
+
+  GlueJobImportDemoDataToRedshift:
+    Type: "AWS::Glue::Job"
+    Properties:
+      Name: !Sub "import_demo_data_to_redshift-${AWS::Region}"
+      Role: !GetAtt IAMRole.Arn
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
+      Command:
+        Name: "glueetl"
+        ScriptLocation: !Sub "s3://${GlueScriptsS3Bucket}/admin/import_demo_data_to_redshift.py"
+        PythonVersion: "3"
+      DefaultArguments:
+        --TempDir: !Sub "s3://${GlueTempS3Bucket}/admin"
+        --enable-metrics: ""
+        --enable-continuous-cloudwatch-log: "true"
+        --enable-continuous-log-filter: "true"
+        --job-bookmark-option: "job-bookmark-enable"
+        --job-language: "python"
+        --db_name: !Ref DBName
+        --redshift_connection: !Ref GlueConnection
+        --cis_bucket: !Sub "${BusinessZoneS3Bucket}/cisdata"
+        --geo_bucket: !Sub "${BusinessZoneS3Bucket}/geodata"
+      Connections:
+        Connections:
+          - !Ref GlueConnection
+      MaxRetries: 0
+      Timeout: 2880
+      GlueVersion: "2.0"
+      #AllocatedCapacity: !Ref DPU
+      MaxCapacity: !Ref DPU
+
+  GlueTrigger:
+    Type: "AWS::Glue::Trigger"
+    Properties:
+      Actions:
+        - CrawlerName: !Ref GlueCrawler6RawCrawler
+      Name: !Sub "ScheduledStart-${AWS::Region}"
+      Type: SCHEDULED
+      Description: "Scheduled trigger, 9am each day"
+      Schedule: cron(0 */9 * * ? *)
+      WorkflowName: !Ref GlueWorkflow
+
+  GlueTrigger2:
+    Type: "AWS::Glue::Trigger"
+    Properties:
+      Actions:
+        - CrawlerName: !Ref GlueCrawler5CleanCrawler
+      Name: !Sub "clean-data-crawler-${AWS::Region}"
+      Type: "CONDITIONAL"
+      StartOnCreation: true
+      WorkflowName: !Ref GlueWorkflow
+      Predicate:
+        Conditions:
+          - LogicalOperator: "EQUALS"
+            JobName: !Ref GlueJob6RawToClean
+            State: "SUCCEEDED"
+
+  GlueTrigger3:
+    Type: "AWS::Glue::Trigger"
+    Properties:
+      Name: !Sub "export-to-redshift-${AWS::Region}"
+      Type: "CONDITIONAL"
+      StartOnCreation: true
+      WorkflowName: !Ref GlueWorkflow
+      Actions:
+        - JobName: !Ref GlueJob4BusinessDailyToRedshift
+      Predicate:
+        Conditions:
+          - LogicalOperator: "EQUALS"
+            CrawlerName: !Ref GlueCrawler4BusinessDailyCrawler
+            CrawlState: "SUCCEEDED"
+
+  GlueTrigger4:
+    Type: "AWS::Glue::Trigger"
+    Properties:
+      Name: !Sub "trigger-business-daily-crawler-${AWS::Region}"
+      Type: "CONDITIONAL"
+      StartOnCreation: true
+      WorkflowName: !Ref GlueWorkflow
+      Actions:
+        - CrawlerName: !Ref GlueCrawler4BusinessDailyCrawler
+      Predicate:
+        Conditions:
+          - LogicalOperator: "EQUALS"
+            JobName: !Ref GlueJob5CleanToBusiness
+            State: "SUCCEEDED"
+
+  GlueTrigger5:
+    Type: "AWS::Glue::Trigger"
+    Properties:
+      Name: !Sub "trigger-clean-to-business-${AWS::Region}"
+      Type: "CONDITIONAL"
+      StartOnCreation: true
+      WorkflowName: !Ref GlueWorkflow
+      Actions:
+        - JobName: !Ref GlueJob5CleanToBusiness
+      Predicate:
+        Conditions:
+          - LogicalOperator: "EQUALS"
+            CrawlerName: !Ref GlueCrawler5CleanCrawler
+            CrawlState: "SUCCEEDED"
+
+  GlueTrigger6:
+    Type: "AWS::Glue::Trigger"
+    Properties:
+      Name: "trigger-daily-agg-crawler"
+      Type: "CONDITIONAL"
+      StartOnCreation: true
+      WorkflowName: !Ref GlueWorkflow
+      Actions:
+        - CrawlerName: !Ref GlueCrawler
+      Predicate:
+        Conditions:
+          -
+            LogicalOperator: "EQUALS"
+            JobName: !Ref GlueJob1AggDaily
+            State: "SUCCEEDED"
+
+  GlueTrigger7:
+    Type: "AWS::Glue::Trigger"
+    Properties:
+      Name: "trigger-daily-aggregate"
+      Type: "CONDITIONAL"
+      StartOnCreation: true
+      WorkflowName: !Ref GlueWorkflow
+      Actions:
+        - JobName: !Ref GlueJob1AggDaily
+      Predicate:
+        Conditions:
+          -
+            LogicalOperator: "EQUALS"
+            CrawlerName: !Ref GlueCrawler4BusinessDailyCrawler
+            CrawlState: "SUCCEEDED"
+
+  GlueTrigger8:
+    Type: "AWS::Glue::Trigger"
+    Properties:
+      Name: "trigger-monthly-agg-crawler"
+      Type: "CONDITIONAL"
+      StartOnCreation: true
+      WorkflowName: !Ref GlueWorkflow
+      Actions:
+        - CrawlerName: !Ref GlueCrawler2
+      Predicate:
+        Conditions:
+          -
+            LogicalOperator: "EQUALS"
+            JobName: !Ref GlueJob2AggMonthly
+            State: "SUCCEEDED"
+
+  GlueTrigger9:
+    Type: "AWS::Glue::Trigger"
+    Properties:
+      Name: "trigger-monthly-aggregate"
+      Type: "CONDITIONAL"
+      StartOnCreation: true
+      WorkflowName: !Ref GlueWorkflow
+      Actions:
+        - JobName: !Ref GlueJob2AggMonthly
+      Predicate:
+        Conditions:
+          -
+            LogicalOperator: "EQUALS"
+            CrawlerName: !Ref GlueCrawler4BusinessDailyCrawler
+            CrawlState: "SUCCEEDED"
+
+  GlueTrigger10:
+    Type: "AWS::Glue::Trigger"
+    Properties:
+      Name: !Sub "trigger-raw-to-clean-${AWS::Region}"
+      Type: "CONDITIONAL"
+      StartOnCreation: true
+      WorkflowName: !Ref GlueWorkflow
+      Actions:
+        - JobName: !Ref GlueJob6RawToClean
+      Predicate:
+        Conditions:
+          - LogicalOperator: "EQUALS"
+            CrawlerName: !Ref GlueCrawler6RawCrawler
+            CrawlState: "SUCCEEDED"
+
+  GlueTrigger11:
+    Type: "AWS::Glue::Trigger"
+    Properties:
+      Name: "trigger-weekly-agg-crawler"
+      Type: "CONDITIONAL"
+      StartOnCreation: true
+      WorkflowName: !Ref GlueWorkflow
+      Actions:
+        - CrawlerName: !Ref GlueCrawler3
+      Predicate:
+        Conditions:
+          -
+            LogicalOperator: "EQUALS"
+            JobName: !Ref GlueJob3AggWeekly
+            State: "SUCCEEDED"
+
+  GlueTrigger12:
+    Type: "AWS::Glue::Trigger"
+    Properties:
+      Name: "trigger-weekly-aggregate"
+      Type: "CONDITIONAL"
+      StartOnCreation: true
+      WorkflowName: !Ref GlueWorkflow
+      Actions:
+        - JobName: !Ref GlueJob3AggWeekly
+      Predicate:
+        Conditions:
+          -
+            LogicalOperator: "EQUALS"
+            CrawlerName: !Ref GlueCrawler4BusinessDailyCrawler
+            CrawlState: "SUCCEEDED"
+
+  IAMManagedPolicy:
+    Type: "AWS::IAM::ManagedPolicy"
+    Properties:
+      ManagedPolicyName: !Sub "MeterData-S3Bucket-Access-Policy-${AWS::Region}"
+      Path: "/service-role/"
+      PolicyDocument: !If
+        - CreateLZS3BucketCondition
+        - !Sub |
+          {
+              "Version": "2012-10-17",
+              "Statement": [
+                  {
+                      "Effect": "Allow",
+                      "Action": [
+                          "s3:*"
+                      ],
+                      "Resource": [
+                          "arn:aws-cn:s3:::${BusinessZoneS3Bucket}",
+                          "arn:aws-cn:s3:::${LandingZoneS3Bucket}",
+                          "arn:aws-cn:s3:::${CleanZoneS3Bucket}",
+                          "arn:aws-cn:s3:::${TempWorkflowS3Bucket}",
+                          "arn:aws-cn:s3:::${GlueScriptsS3Bucket}",
+                          "arn:aws-cn:s3:::${GlueTempS3Bucket}"
+                      ]
+                  }
+              ]
+          }
+        - !Sub |
+          {
+              "Version": "2012-10-17",
+              "Statement": [
+                  {
+                      "Effect": "Allow",
+                      "Action": [
+                          "s3:*"
+                      ],
+                      "Resource": [
+                          "arn:aws-cn:s3:::${BusinessZoneS3Bucket}",
+                          "arn:aws-cn:s3:::${LandingZoneS3BucketName}",
+                          "arn:aws-cn:s3:::${CleanZoneS3Bucket}",
+                          "arn:aws-cn:s3:::${TempWorkflowS3Bucket}",
+                          "arn:aws-cn:s3:::${GlueScriptsS3Bucket}",
+                          "arn:aws-cn:s3:::${GlueTempS3Bucket}"
+                      ]
+                  }
+              ]
+          }
+
+
+  GlueJobStateChangeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: "EventRule"
+      EventPattern:
+        source:
+          - "aws.glue"
+        detail-type:
+          - "Glue Job State Change"
+      State: "ENABLED"
+      Targets:
+        - Arn: !Ref TopicArn
+          Id: "SNSTarget"
+  EventTopicPolicy:
+    Type: 'AWS::SNS::TopicPolicy'
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: 'sns:Publish'
+            Resource: !Ref TopicArn
+      Topics:
+        - !Ref TopicArn
+
+  IAMRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      Path: "/service-role/"
+      AssumeRolePolicyDocument: "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Service\":\"glue.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}"
+      MaxSessionDuration: 3600
+      ManagedPolicyArns:
+        - !Ref IAMManagedPolicy
+        - "arn:aws-cn:iam::aws:policy/AmazonS3FullAccess"
+        - "arn:aws-cn:iam::aws:policy/service-role/AWSGlueServiceRole"
+        - "arn:aws-cn:iam::aws:policy/AmazonRedshiftFullAccess"
+
+  BusinessZoneS3Bucket:
+    Type: "AWS::S3::Bucket"
+
+  LandingZoneS3Bucket:
+    Type: "AWS::S3::Bucket"
+    Condition: CreateLZS3BucketCondition
+
+  CleanZoneS3Bucket:
+    Type: "AWS::S3::Bucket"
+
+  TempWorkflowS3Bucket:
+    Type: "AWS::S3::Bucket"
+
+  CisS3Bucket:
+    Type: "AWS::S3::Bucket"
+
+  GlueDatabase:
+    Type: "AWS::Glue::Database"
+    Properties:
+      DatabaseInput:
+        Name: !Ref DBName
+      CatalogId: !Ref "AWS::AccountId"
+
+  GlueConnection:
+    Type: "AWS::Glue::Connection"
+    Properties:
+      ConnectionInput:
+        Description: ""
+        ConnectionType: "JDBC"
+        PhysicalConnectionRequirements:
+          SubnetId: !Ref Subnet1ID
+          SecurityGroupIdList:
+            - !GetAtt GlueSecurityGroup.GroupId
+            - !Ref RedshiftSecurityGroupId
+          AvailabilityZone: !Ref AvailabilityZone
+        ConnectionProperties:
+          "JDBC_CONNECTION_URL": !Sub "jdbc:redshift://${RedshiftClusterEndpoint}/${DBName}"
+          "JDBC_ENFORCE_SSL": "false"
+          PASSWORD: !Ref MasterUserPassword
+          USERNAME: !Ref MasterUsername
+        Name: !Ref ClusterName
+      CatalogId: !Ref "AWS::AccountId"
+
+  GlueSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Security group for Glue
+      VpcId: !Ref VPCID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref RedshiftPort
+          ToPort: !Ref RedshiftPort
+          CidrIp: !Ref RemoteAccessCIDR
+          Description: 'Glue Access to VPC CIDR'
+
+  SelfReferencingIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: Self referencing security group ingress rule for glue access
+      FromPort: -1
+      GroupId: !Ref GlueSecurityGroup
+      IpProtocol: "-1"
+      SourceSecurityGroupId: !Ref GlueSecurityGroup
+      ToPort: -1
+
+  EC2VPCEndpoint:
+    Type: "AWS::EC2::VPCEndpoint"
+    Properties:
+      VpcEndpointType: "Gateway"
+      VpcId: !Ref VPCID
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
+      PolicyDocument: "{\"Version\":\"2008-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":\"*\",\"Action\":\"*\",\"Resource\":\"*\"}]}"
+      RouteTableIds:
+        - !Ref VPCRouteTableId
+      PrivateDnsEnabled: false
+
+Outputs:
+  LandingZoneS3Bucket:
+    Value: !If
+      - CreateLZS3BucketCondition
+      - !Ref LandingZoneS3Bucket
+      - !Ref LandingZoneS3BucketName
+  CleanZoneS3Bucket:
+    Value: !Ref CleanZoneS3Bucket
+  TempWorkflowS3Bucket:
+    Value: !Ref TempWorkflowS3Bucket
+  BusinessZoneS3Bucket:
+    Value: !Ref BusinessZoneS3Bucket
+  GlueWorkflow:
+    Value: !Ref GlueWorkflow
+  JobNameTransformCleanToBusiness:
+    Value: !Ref GlueJob4BusinessDailyToRedshift
+
+Parameters:
+  MasterUsername:
+    Type: String
+
+  MasterUserPassword:
+    Type: String
+
+  RedshiftClusterEndpoint:
+    Type: String
+
+  RedshiftSecurityGroupId:
+    Type: String
+
+  RedshiftPort:
+    Type: String
+
+  ClusterName:
+    Type: String
+    Default: redshift-cluster-1
+
+  DBName:
+    Type: String
+    Default: meter-data
+
+  Subnet1ID:
+    Type: AWS::EC2::Subnet::Id
+
+  VPCID:
+    Type: AWS::EC2::VPC::Id
+
+  RemoteAccessCIDR:
+    Type: String
+
+  GlueScriptsS3Bucket:
+    Type: String
+
+  GlueTempS3Bucket:
+    Type: String
+
+  VPCRouteTableId:
+    Type: String
+
+  AvailabilityZone:
+    Type: AWS::EC2::AvailabilityZone::Name
+
+  LandingzoneTransformer:
+    Type: String
+
+  CreateLandingZoneS3Bucket:
+    Type: String
+    Default: 'Yes'
+    Description: Select 'No' if you have an existing S3 bucket with raw meter data which you would like to use. Otherwise leave default value as 'Yes'.
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+
+  LandingZoneS3BucketName:
+    Type: String
+    Default: ""
+    Description: (Conditional) You must provide a value if you select 'No' for 'Create Landing Zone bucket' parameter above.
+
+  DPU:
+    Type: String
+    Description: No. of DPUs for Glue Job
+    Default: 10
+
+  TopicArn:
+    Type: String
+    Description: ARN of ML Pipeline State SNS Topic

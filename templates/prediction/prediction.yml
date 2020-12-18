@@ -1,0 +1,600 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: 'Meter Data Lake prediction pipeline'
+Conditions:
+  UsingDefaultBucket: !Equals [!Ref QSS3BucketName, 'aws-quickstart']
+
+Mappings:
+  TrainingImageMap:
+    us-west-1:
+      image: "632365934929.dkr.ecr.us-west-1.amazonaws.com"
+    us-west-2:
+      image: "156387875391.dkr.ecr.us-west-2.amazonaws.com"
+    us-east-1:
+      image: "522234722520.dkr.ecr.us-east-1.amazonaws.com"
+    us-east-2:
+      image: "566113047672.dkr.ecr.us-east-2.amazonaws.com"
+    ap-east-1:
+      image: "286214385809.dkr.ecr.ap-east-1.amazonaws.com"
+    ap-northeast-1:
+      image: "633353088612.dkr.ecr.ap-northeast-1.amazonaws.com"
+    ap-northeast-2:
+      image: "204372634319.dkr.ecr.ap-northeast-2.amazonaws.com"
+    ap-south-1:
+      image: "991648021394.dkr.ecr.ap-south-1.amazonaws.com"
+    ap-southeast-1:
+      image: "475088953585.dkr.ecr.ap-southeast-1.amazonaws.com"
+    ap-southeast-2:
+      image: "514117268639.dkr.ecr.ap-southeast-2.amazonaws.com"
+    ca-central-1:
+      image: "469771592824.dkr.ecr.ca-central-1.amazonaws.com"
+    cn-north-1:
+      image: "390948362332.dkr.ecr.cn-north-1.amazonaws.com.cn"
+    cn-northwest-1:
+      image: "387376663083.dkr.ecr.cn-northwest-1.amazonaws.com.cn"
+    eu-north-1:
+      image: "669576153137.dkr.ecr.eu-north-1.amazonaws.com"
+    eu-central-1:
+      image: "495149712605.dkr.ecr.eu-central-1.amazonaws.com"
+    eu-west-1:
+      image: "224300973850.dkr.ecr.eu-west-1.amazonaws.com"
+    eu-west-2:
+      image: "644912444149.dkr.ecr.eu-west-2.amazonaws.com"
+    eu-west-3:
+      image: "749696950732.dkr.ecr.eu-west-3.amazonaws.com"
+    me-south-1:
+      image: "249704162688.dkr.ecr.me-south-1.amazonaws.com"
+    sa-east-1:
+      image: "855470959533.dkr.ecr.sa-east-1.amazonaws.com"
+    us-gov-west-1:
+      image: "226302683700.dkr.ecr.us-gov-west-1.amazonaws.com"
+
+Globals:
+  Function:
+    Runtime: python3.7
+    Environment:
+      Variables:
+        Db_schema: !Ref DBName
+        Athena_bucket: !Ref AthenaQueryBucket
+        Working_bucket: !Ref WorkingBucket
+        With_weather_data: !Ref WithWeather
+
+Resources:
+  AthenaQueryBucket:
+    Type: AWS::S3::Bucket
+
+  WorkingBucket:
+    Type: AWS::S3::Bucket
+
+  MlPipelineTriggerStateMachine:
+    Type: 'AWS::Serverless::StateMachine'
+    Properties:
+      DefinitionUri:
+        Bucket: !Ref QSS3BucketName
+        Key:
+          Fn::Sub: '${QSS3KeyPrefix}assets/statemachine/ml_pipeline_trigger_state_machine.asl.json'
+      DefinitionSubstitutions:
+        LoadPipelineParameter: !Ref LoadPipelineParameter
+        InitialTrainingStateMachine: !Ref InitialTrainingStateMachine
+        PredictionPipelineStateMachine: !Ref PredictionPipelineStateMachine
+        CheckInitialPipelineRun: !Ref CheckInitialPipelineRun
+      Policies:
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action:
+                - events:PutTargets
+                - events:PutRule
+                - events:DescribeRule
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - "iam:PassRole"
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - "states:StartExecution"
+              Resource:
+                - !Ref InitialTrainingStateMachine
+                - !Ref PredictionPipelineStateMachine
+        - LambdaInvokePolicy:
+            FunctionName: !Ref CheckInitialPipelineRun
+        - LambdaInvokePolicy:
+            FunctionName: !Ref LoadPipelineParameter
+
+  # init training statemachine
+  InitialTrainingStateMachine:
+    Type: 'AWS::Serverless::StateMachine'
+    Properties:
+      DefinitionUri:
+        Bucket: !Ref QSS3BucketName
+        Key:
+          Fn::Sub: '${QSS3KeyPrefix}assets/statemachine/state-machine-training.asl.json'
+      DefinitionSubstitutions:
+        WorkingBucket: !Ref WorkingBucket
+        LambdaPrepareTrainingName: !Ref PrepareTrainingFunction
+        AccountId: !Sub ${AWS::AccountId}
+        SageMakerRole: !GetAtt SageMakerRole.Arn
+        TrainingImage: !FindInMap [TrainingImageMap, !Ref "AWS::Region", "image"]
+      Policies:
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action:
+                - events:PutTargets
+                - events:PutRule
+                - events:DescribeRule
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - "iam:PassRole"
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - sagemaker:CreateTransformJob
+                - sagemaker:DescribeTransformJob
+                - sagemaker:StopTransformJob
+                - sagemaker:CreateTrainingJob
+                - sagemaker:DescribeTrainingJob
+                - sagemaker:StopTrainingJob
+                - sagemaker:CreateHyperParameterTuningJob
+                - sagemaker:DescribeHyperParameterTuningJob
+                - sagemaker:StopHyperParameterTuningJob
+                - sagemaker:CreateModel
+                - sagemaker:CreateEndpointConfig
+                - sagemaker:CreateEndpoint
+                - sagemaker:DeleteEndpointConfig
+                - sagemaker:DeleteEndpoint
+                - sagemaker:UpdateEndpoint
+                - sagemaker:ListTags
+              Resource: "arn:aws-cn:sagemaker:*:*:*"
+        - LambdaInvokePolicy:
+            FunctionName: !Ref PrepareTrainingFunction
+
+
+  # Step functions state machine
+  PredictionPipelineStateMachine:
+    Type: 'AWS::Serverless::StateMachine'
+    Properties:
+      DefinitionUri:
+        Bucket: !Ref QSS3BucketName
+        Key:
+          Fn::Sub: '${QSS3KeyPrefix}assets/statemachine/state-machine-prediction-pipeline.asl.json'
+      DefinitionSubstitutions:
+        AnomalyCrawler: !Ref AnomalyCrawler
+        ForecastCrawler: !Ref ForecastCrawler
+        LambdaSplitFunctionName: !Ref SplitBatchFunction
+        LambdaPrepareFunctionName: !Ref PrepareBatchFunction
+        LambdaResultFunctionName: !Ref UploadResultFunction
+        LambdaAnomalyFunctionName: !Ref BatchAnomalyDetection
+        LambdaTriggerCrawlerFunctionName: !Ref TriggerGlueCrawlerFunction
+        LambdaGetCrawlerStateFunctionName: !Ref GetGlueCrawlerStateFunction
+      Policies:
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action:
+                - events:PutTargets
+                - events:PutRule
+                - events:DescribeRule
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                  - sagemaker:CreateTransformJob
+                  - sagemaker:DescribeTransformJob
+                  - sagemaker:StopTransformJob
+                  - sagemaker:CreateTrainingJob
+                  - sagemaker:DescribeTrainingJob
+                  - sagemaker:StopTrainingJob
+                  - sagemaker:CreateHyperParameterTuningJob
+                  - sagemaker:DescribeHyperParameterTuningJob
+                  - sagemaker:StopHyperParameterTuningJob
+                  - sagemaker:CreateModel
+                  - sagemaker:CreateEndpointConfig
+                  - sagemaker:CreateEndpoint
+                  - sagemaker:DeleteEndpointConfig
+                  - sagemaker:DeleteEndpoint
+                  - sagemaker:UpdateEndpoint
+                  - sagemaker:ListTags
+              Resource: "arn:aws-cn:sagemaker:*:*:*"
+        - LambdaInvokePolicy:
+            FunctionName: !Ref SplitBatchFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref BatchAnomalyDetection
+        - LambdaInvokePolicy:
+            FunctionName: !Ref PrepareBatchFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref UploadResultFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref TriggerGlueCrawlerFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref GetGlueCrawlerStateFunction
+
+  #
+  # Lambda functions
+  #
+  LoadPipelineParameter:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      MemorySize: 128
+      Timeout: 30
+      CodeUri:
+        Bucket: !Ref QSS3BucketName
+        Key:
+          Fn::Sub: '${QSS3KeyPrefix}assets/functions/packages/load_pipeline_parameter.zip'
+      Handler: app.lambda_handler
+      Role: !GetAtt 'ExecuteLambdaRole.Arn'
+      Layers:
+        - !Ref DependencyLayer
+
+  PrepareTrainingFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      MemorySize: 512
+      Timeout: 600
+      CodeUri:
+        Bucket: !Ref QSS3BucketName
+        Key:
+          Fn::Sub: '${QSS3KeyPrefix}assets/functions/packages/prepare_training.zip'
+      Handler: app.lambda_handler
+      Role: !GetAtt 'ExecuteLambdaRole.Arn'
+      Layers:
+        - !Ref DependencyLayer
+
+  CheckInitialPipelineRun:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      MemorySize: 128
+      Timeout: 30
+      CodeUri:
+        Bucket: !Ref QSS3BucketName
+        Key:
+          Fn::Sub: '${QSS3KeyPrefix}assets/functions/packages/check_initial_pipeline_run.zip'
+      Handler: app.lambda_handler
+      Role: !GetAtt 'ExecuteLambdaRole.Arn'
+      Layers:
+        - !Ref DependencyLayer
+
+  StateTopicSubscription:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      MemorySize: 128
+      Timeout: 30
+      CodeUri:
+        Bucket: !Ref QSS3BucketName
+        Key:
+          Fn::Sub: '${QSS3KeyPrefix}assets/functions/packages/state_topic_subscription.zip'
+      Handler: app.lambda_handler
+      Role: !GetAtt 'ExecuteLambdaRole.Arn'
+      Environment:
+        Variables:
+          ml_pipeline_trigger_state_machine: !Ref MlPipelineTriggerStateMachine
+          glue_job_name: !Ref GlueJobNameTrigger
+      Events:
+        SnsTrigger:
+          Type: SNS
+          Properties:
+            Topic: !Ref TopicArn
+      Layers:
+        - !Ref DependencyLayer
+
+  SplitBatchFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      Timeout: 300
+      CodeUri:
+        Bucket: !Ref QSS3BucketName
+        Key:
+          Fn::Sub: '${QSS3KeyPrefix}assets/functions/packages/split_batch.zip'
+      Handler: app.lambda_handler
+      Role: !GetAtt 'ExecuteLambdaRole.Arn'
+      Layers:
+        - !Ref DependencyLayer
+
+  PrepareBatchFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      MemorySize: 512
+      Timeout: 900
+      CodeUri:
+        Bucket: !Ref QSS3BucketName
+        Key:
+          Fn::Sub: '${QSS3KeyPrefix}assets/functions/packages/prepare_batch.zip'
+      Handler: app.lambda_handler
+      Role: !GetAtt 'ExecuteLambdaRole.Arn'
+      Layers:
+        - !Ref DependencyLayer
+
+  UploadResultFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      Timeout: 180
+      CodeUri:
+        Bucket: !Ref QSS3BucketName
+        Key:
+          Fn::Sub: '${QSS3KeyPrefix}assets/functions/packages/upload_result.zip'
+      Handler: app.lambda_handler
+      Role: !GetAtt 'ExecuteLambdaRole.Arn'
+      Layers:
+        - !Ref DependencyLayer
+
+  BatchAnomalyDetection:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      Handler: app.lambda_handler
+      Runtime: python3.7
+      CodeUri:
+        Bucket: !Ref QSS3BucketName
+        Key:
+          Fn::Sub: '${QSS3KeyPrefix}assets/functions/packages/batch_anomaly_detection.zip'
+      MemorySize: 2048
+      Timeout: 600
+      Role: !GetAtt 'ExecuteLambdaRole.Arn'
+      Layers:
+        - !Ref BatchAnomalyDependencyLayer
+
+  TriggerGlueCrawlerFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      Timeout: 60
+      CodeUri:
+        Bucket: !Ref QSS3BucketName
+        Key:
+          Fn::Sub: '${QSS3KeyPrefix}assets/functions/packages/crawler_trigger_glue_crawler.zip'
+      Handler: app.lambda_handler
+      Role: !GetAtt 'ExecuteLambdaRole.Arn'
+
+  GetGlueCrawlerStateFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      Timeout: 60
+      CodeUri:
+        Bucket: !Ref QSS3BucketName
+        Key:
+          Fn::Sub: '${QSS3KeyPrefix}assets/functions/packages/crawler_get_glue_crawler_state.zip'
+      Handler: app.lambda_handler
+      Role: !GetAtt 'ExecuteLambdaRole.Arn'
+
+  #
+  # Lambda Dependency Layer
+  #
+  BatchAnomalyDependencyLayer:
+    Type: 'AWS::Serverless::LayerVersion'
+    Properties:
+      LayerName: !Sub "ml-app-dependencies-${AWS::Region}"
+      Description: Dependencies for sam app
+      ContentUri:
+        Bucket: !Ref QSS3BucketName
+        Key:
+          Fn::Sub: '${QSS3KeyPrefix}assets/functions/packages/dependencies/anomaly_detection/layer.zip'
+      CompatibleRuntimes:
+        - python3.7
+      LicenseInfo: 'Available under the MIT-0 license.'
+      RetentionPolicy: Retain
+
+  DependencyLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: !Sub "common-app-dependencies-${AWS::Region}"
+      ContentUri:
+        Bucket: !Ref QSS3BucketName
+        Key:
+          Fn::Sub: '${QSS3KeyPrefix}assets/functions/packages/dependencies/common/common-layer.zip'
+      CompatibleRuntimes:
+        - python3.7
+      LicenseInfo: 'MIT'
+      RetentionPolicy: Retain
+
+  #
+  # Crawler
+  #
+  ForecastCrawler:
+    Type: "AWS::Glue::Crawler"
+    Properties:
+      Name: !Sub "meter-data-forecast-crawler-${AWS::Region}"
+      Role: !Sub "service-role/${CrawlerRole}"
+      Targets:
+        S3Targets:
+          - Path: !Sub "${WorkingBucket}/meteranalytics/forecast"
+      DatabaseName: !Ref DBName
+      SchemaChangePolicy:
+        UpdateBehavior: "UPDATE_IN_DATABASE"
+        DeleteBehavior: "DEPRECATE_IN_DATABASE"
+
+  AnomalyCrawler:
+    Type: "AWS::Glue::Crawler"
+    Properties:
+      Name: !Sub "meter-data-anomaly-crawler-${AWS::Region}"
+      Role: !Sub "service-role/${CrawlerRole}"
+      Targets:
+        S3Targets:
+          - Path: !Sub "${WorkingBucket}/meteranalytics/anomaly"
+      DatabaseName: !Ref DBName
+      SchemaChangePolicy:
+        UpdateBehavior: "UPDATE_IN_DATABASE"
+        DeleteBehavior: "DEPRECATE_IN_DATABASE"
+
+  #
+  # glue database
+  #
+  GlueTableGeodata:
+    Type: "AWS::Glue::Table"
+    Properties:
+      DatabaseName: !Ref DBName
+      CatalogId: !Ref "AWS::AccountId"
+      TableInput:
+        Name: "geodata"
+        TableType: "EXTERNAL_TABLE"
+        StorageDescriptor:
+          Columns:
+            - Name: "col0"
+              Type: "string"
+            - Name: "col1"
+              Type: "double"
+            - Name: "col2"
+              Type: "double"
+          Location: !Sub "s3://${BusinessZoneS3Bucket}/geodata/"
+          InputFormat: "org.apache.hadoop.mapred.TextInputFormat"
+          OutputFormat: "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat"
+          Compressed: false
+          NumberOfBuckets: -1
+          SerdeInfo:
+            SerializationLibrary: "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe"
+            Parameters:
+              "field.delim": ","
+              "skip.header.line.count": 0
+          Parameters:
+            CrawlerSchemaDeserializerVersion: "1.0"
+            CrawlerSchemaSerializerVersion: "1.0"
+            areColumnsQuoted: "false"
+
+  GlueTableAnomaly:
+    Type: "AWS::Glue::Table"
+    Properties:
+      DatabaseName: !Ref DBName
+      CatalogId: !Ref "AWS::AccountId"
+      TableInput:
+        Name: "anomaly"
+        TableType: "EXTERNAL_TABLE"
+        StorageDescriptor:
+          Columns:
+            - Name: "meter_id"
+              Type: "string"
+            - Name: "ds"
+              Type: "string"
+            - Name: "consumption"
+              Type: "double"
+            - Name: "yhat_lower"
+              Type: "double"
+            - Name: "yhat_upper"
+              Type: "double"
+            - Name: "anomaly"
+              Type: "bigint"
+            - Name: "importance"
+              Type: "double"
+          Location: !Sub "s3://${WorkingBucket}/meteranalytics/anomaly/"
+          InputFormat: "org.apache.hadoop.mapred.TextInputFormat"
+          OutputFormat: "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat"
+          Compressed: false
+          NumberOfBuckets: -1
+          SerdeInfo:
+            SerializationLibrary: "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe"
+            Parameters:
+              "field.delim": ","
+              "skip.header.line.count": 1
+          Parameters:
+            CrawlerSchemaDeserializerVersion: "1.0"
+            CrawlerSchemaSerializerVersion: "1.0"
+            areColumnsQuoted: "false"
+            UPDATED_BY_CRAWLER: !Ref AnomalyCrawler
+
+  #
+  # IAM roles
+  #
+  CrawlerRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      Path: "/service-role/"
+      AssumeRolePolicyDocument: "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Service\":\"glue.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}"
+      MaxSessionDuration: 3600
+      ManagedPolicyArns:
+        - "arn:aws-cn:iam::aws:policy/AmazonS3FullAccess"
+        - "arn:aws-cn:iam::aws:policy/service-role/AWSGlueServiceRole"
+
+  ExecuteLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 'lambda.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws-cn:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+        - 'arn:aws-cn:iam::aws:policy/service-role/AWSGlueServiceRole'
+        - 'arn:aws-cn:iam::aws:policy/AmazonS3FullAccess'
+        - 'arn:aws-cn:iam::aws:policy/AmazonAthenaFullAccess'
+        - 'arn:aws-cn:iam::aws:policy/AmazonSageMakerFullAccess'
+        - 'arn:aws-cn:iam::aws:policy/AWSStepFunctionsFullAccess'
+
+  SageMakerRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 'sagemaker.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws-cn:iam::aws:policy/AmazonS3FullAccess'
+        - 'arn:aws-cn:iam::aws:policy/AmazonAthenaFullAccess'
+        - 'arn:aws-cn:iam::aws:policy/AmazonSageMakerFullAccess'
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: AWS Quick Start configuration
+        Parameters:
+          - QSS3BucketName
+          - QSS3KeyPrefix
+          - DBName
+    ParameterLabels:
+      QSS3BucketName:
+        default: Quick Start S3 bucket name
+      QSS3KeyPrefix:
+        default: Quick Start S3 key prefix
+      DBName:
+        default: Glue data catalog database name
+Parameters:
+  QSS3BucketName:
+    AllowedPattern: '^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$'
+    ConstraintDescription: >-
+      Quick Start bucket name can include numbers, lowercase letters, uppercase
+      letters, and hyphens (-). It cannot start or end with a hyphen (-).
+    Default: aws-quickstart
+    Description: >-
+      S3 bucket name for the Quick Start assets.
+      Only change this value if you customize or extend the Quick Start for your own use.
+      This string can include numbers, lowercase letters, uppercase letters, and hyphens (-).
+      It cannot start or end with a hyphen (-).
+    Type: String
+  QSS3KeyPrefix:
+    AllowedPattern: '^[0-9a-zA-Z-/]*[/]$'
+    ConstraintDescription: >-
+      Quick Start key prefix can include numbers, lowercase letters, uppercase
+      letters, hyphens (-), and forward slash (/) and must terminate in a forward slash.
+    Default: quickstart-aws-utility-meter-data-analytics-platform/
+    Type: String
+    Description: S3 key prefix for the Quick Start assets. Quick Start key prefix
+      can include numbers, lowercase letters, uppercase letters, hyphens (-), and
+      forward slash (/).
+  DBName:
+    ConstraintDescription: >-
+      Name of the glue data catalog database
+    Default: meter-data
+    Type: String
+  TopicArn:
+    Type: String
+  GlueJobNameTrigger:
+    Type: String
+  BusinessZoneS3Bucket:
+    Type: String
+  WithWeather:
+    Description: >-
+      Enables or disables the use of weather data.
+      0 = weather data won't be used
+      1 = enable weather data use
+    Type: Number
+
+Outputs:
+  AthenaQueryBucket:
+    Value: !Ref AthenaQueryBucket
+  WorkingBucket:
+    Value: !Ref WorkingBucket
+  MlPipeline:
+    Value: !Ref MlPipelineTriggerStateMachine

@@ -1,0 +1,84 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Create SageMaker notebook instance with demo notebooks loaded"
+Parameters:
+  Session:
+    Type: String
+    Description: Session name must satisfy regular expression pattern ^[a-zA-Z0-9](-*[a-zA-Z0-9])*
+    Default: "meter-data-demo"
+  QSS3BucketName:
+    AllowedPattern: ^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$
+    Default: aws-quickstart
+    Type: String
+  QSS3KeyPrefix:
+    AllowedPattern: ^[0-9a-zA-Z-/]*$
+    Default: quickstart-aws-utility-meter-data-analytics-platform/
+    Type: String
+
+
+Resources:
+  SageMakerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - sagemaker.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws-cn:iam::aws:policy/AmazonSageMakerReadOnly
+        - arn:aws-cn:iam::aws:policy/CloudWatchLogsFullAccess
+        - arn:aws-cn:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws-cn:iam::aws:policy/AWSGlueConsoleSageMakerNotebookFullAccess
+      Path: /service-role/
+      Policies:
+        - PolicyName: !Sub "SagemakerExecution-${AWS::Region}"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource:
+                  - Fn::Sub: 'arn:aws-cn:iam::${AWS::AccountId}:role/*'
+  NotebookLifecycle:
+    Type: AWS::SageMaker::NotebookInstanceLifecycleConfig
+    Properties:
+      OnStart:
+      - Content:         
+          Fn::Base64: !Sub |
+            #!/bin/bash -xe
+
+            name="Meter_demo"
+
+            cd /home/ec2-user/SageMaker
+            aws s3 cp s3://${QSS3BucketName}/${QSS3KeyPrefix}assets/notebooks/mdm_demos.ipynb .
+            # Create a Jupyter kernel for your new environment
+
+            sudo -u ec2-user -i <<EOF 
+            source /home/ec2-user/anaconda3/bin/activate
+            /home/ec2-user/anaconda3/bin/pip install --quiet altair vega_datasets pyathena 
+            /home/ec2-user/anaconda3/bin/python -m ipykernel install --name "$name" --display-name "$name" --user
+            source /home/ec2-user/anaconda3/bin/deactivate
+            EOF
+
+  NotebookInstance:
+    Type: AWS::SageMaker::NotebookInstance
+    Properties:
+      RoleArn:
+        Fn::GetAtt:
+          - SageMakerRole
+          - Arn
+      NotebookInstanceName:
+        Ref: Session
+      InstanceType: "ml.m5.xlarge"
+      RootAccess: Enabled
+      LifecycleConfigName:
+        Fn::GetAtt:
+        - NotebookLifecycle
+        - NotebookInstanceLifecycleConfigName
+Outputs:
+  NotebookInstance:
+    Value: !GetAtt NotebookInstance.NotebookInstanceName

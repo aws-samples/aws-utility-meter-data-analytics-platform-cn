@@ -1,0 +1,322 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: Create API for getting meter consumption forecast
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: AWS Quick Start configuration
+        Parameters:
+          - QSS3BucketName
+          - QSS3KeyPrefix
+    ParameterLabels:
+      QSS3BucketName:
+        default: Quick Start S3 bucket name
+      QSS3KeyPrefix:
+        default: Quick Start S3 key prefix
+Parameters:
+  QSS3BucketName:
+    AllowedPattern: '^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$'
+    ConstraintDescription: >-
+      Quick Start bucket name can include numbers, lowercase letters, uppercase
+      letters, and hyphens (-). It cannot start or end with a hyphen (-).
+    Default: aws-quickstart
+    Description: >-
+      S3 bucket name for the Quick Start assets.
+      Only change this value if you customize or extend the Quick Start for your own use.
+      This string can include numbers, lowercase letters, uppercase letters, and hyphens (-).
+      It cannot start or end with a hyphen (-).
+    Type: String
+  QSS3KeyPrefix:
+    AllowedPattern: '^[0-9a-zA-Z-/]*[/]$'
+    ConstraintDescription: >-
+      Quick Start key prefix can include numbers, lowercase letters, uppercase
+      letters, hyphens (-), and forward slash (/) and must terminate in a forward slash.
+    Default: quickstart-aws-utility-meter-data-analytics-platform/
+    Type: String
+    Description: S3 key prefix for the Quick Start assets. Quick Start key prefix
+      can include numbers, lowercase letters, uppercase letters, hyphens (-), and
+      forward slash (/).
+  AthenaQueryBucket:
+    AllowedPattern: '^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$'
+    ConstraintDescription: >-
+      Athena Query bucket name can include numbers, lowercase letters, uppercase
+      letters, and hyphens (-). It cannot start or end with a hyphen (-).
+    Description: >-
+      S3 bucket name to save Athena Query results.
+      This string can include numbers, lowercase letters, uppercase letters, and hyphens (-).
+      It cannot start or end with a hyphen (-).
+    Type: String
+  WorkingBucket:
+    Description: >-
+      S3 bucket name to save intermediate configuration.
+    Type: String
+  WithWeather:
+    Description: >-
+      Enables or disables the use of weather data.
+      0 = weather data won't be used
+      1 = enable weather data use
+    Type: Number
+  DBName:
+    ConstraintDescription: >-
+      Name of the glue data catalog database
+    Default: meter-data
+    Type: String
+  VPCID:
+    Type: AWS::EC2::VPC::Id
+  RemoteAccessCIDR:
+    Type: String
+  Subnet1ID:
+    Type: AWS::EC2::Subnet::Id
+  Subnet2ID:
+    Type: AWS::EC2::Subnet::Id
+  RedshiftSecret:
+    Type: String
+
+Globals:
+  Function:
+    Runtime: python3.7
+    Environment:
+      Variables:
+        Athena_bucket: !Ref AthenaQueryBucket
+        Db_schema: !Ref DBName
+        With_weather_data: !Ref WithWeather
+
+Resources:
+  #
+  # Http API
+  #
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+
+  #
+  # IAM
+  #
+  ExecuteLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 'lambda.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws-cn:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+        - 'arn:aws-cn:iam::aws:policy/AmazonS3FullAccess'
+        - 'arn:aws-cn:iam::aws:policy/AmazonAthenaFullAccess'
+        - 'arn:aws-cn:iam::aws:policy/AmazonSageMakerReadOnly'
+      Policies:
+        - PolicyName: sagemaker_invoke_endpoint
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 'sagemaker:InvokeEndpoint'
+                Resource: '*'
+
+  ExecuteRedshiftLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 'lambda.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws-cn:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+        - 'arn:aws-cn:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole'
+      Policies:
+        - PolicyName: secre_manager_read_access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "secretsmanager:GetSecretValue"
+                  - "secretsmanager:DescribeSecret"
+                  - "secretsmanager:ListSecrets"
+                  - "kms:Decrypt"
+                Resource: '*'
+
+  #
+  # Lambda
+  #
+  ConsumptionApi:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      Handler: app.lambda_handler
+      CodeUri:
+        Bucket: !Ref QSS3BucketName
+        Key:
+          Fn::Sub: '${QSS3KeyPrefix}assets/functions/packages/redshift_consumption.zip'
+      Description: Lambda function to get consumption for certain meter in different aggregation levels (daily, weekly, monthly)
+      MemorySize: 256
+      Timeout: 180
+      Role: !GetAtt 'ExecuteRedshiftLambdaRole.Arn'
+      Environment:
+        Variables:
+          SECRET_NAME: !Ref RedshiftSecret
+      Layers:
+        - !Ref PostgresLayer
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaVpcSecurityGroup
+        SubnetIds:
+          - !Ref Subnet1ID
+          - !Ref Subnet2ID
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: GET
+            Path: /consumption/{requested_aggregation}/{year}/{meter_id}
+
+  AnomalyPredictionApi:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      Handler: app.lambda_handler
+      CodeUri:
+        Bucket: !Ref QSS3BucketName
+        Key:
+          Fn::Sub: '${QSS3KeyPrefix}assets/functions/packages/get_anomaly.zip'
+      Description: Lambda function to get anomaly for certain meter
+      MemorySize: 128
+      Timeout: 180
+      Role: !GetAtt 'ExecuteLambdaRole.Arn'
+      Layers:
+        - !Ref DependencyLayer
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: GET
+            Path: /anomaly/{meter_id}
+
+  OutageApi:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      Handler: index.handler
+      CodeUri:
+        Bucket: !Ref QSS3BucketName
+        Key:
+          Fn::Sub: '${QSS3KeyPrefix}assets/functions/packages/outage_info.zip'
+      Description: Lambda function to get outage for a certain timeframe
+      MemorySize: 128
+      Timeout: 180
+      Runtime: "nodejs12.x"
+      Role: !GetAtt 'ExecuteLambdaRole.Arn'
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: GET
+            Path: /outage
+
+  MeterForecastPredictionApi:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      Handler: app.lambda_handler
+      CodeUri:
+        Bucket: !Ref QSS3BucketName
+        Key:
+          Fn::Sub: '${QSS3KeyPrefix}assets/functions/packages/meter_forecast.zip'
+      Description: Lambda function to get meter consumption forecast
+      MemorySize: 128
+      Timeout: 180
+      Role: !GetAtt 'ExecuteLambdaRole.Arn'
+      Layers:
+        - !Ref DependencyLayer
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: GET
+            Path: /forecast/{meter_id}
+      Environment:
+        Variables:
+          WORKING_BUCKET: !Ref WorkingBucket
+
+  #
+  # Dependency Layer
+  #
+  PostgresLayer:
+    Type: 'AWS::Serverless::LayerVersion'
+    Properties:
+      LayerName: !Sub "api-dependencies-${AWS::Region}"
+      Description: Dependencies for sam app
+      ContentUri:
+        Bucket: !Ref QSS3BucketName
+        Key:
+          Fn::Sub: '${QSS3KeyPrefix}assets/functions/packages/dependencies/postgres/layer.zip'
+      CompatibleRuntimes:
+        - python3.7
+      LicenseInfo: 'Available under the MIT-0 license.'
+      RetentionPolicy: Retain
+
+  DependencyLayer:
+    Type: 'AWS::Serverless::LayerVersion'
+    Properties:
+      LayerName: !Sub "api-dependencies-${AWS::Region}"
+      Description: Dependencies for sam app
+      ContentUri:
+        Bucket: !Ref QSS3BucketName
+        Key:
+          Fn::Sub: '${QSS3KeyPrefix}assets/functions/packages/dependencies/common/common-layer.zip'
+      CompatibleRuntimes:
+        - python3.7
+      LicenseInfo: 'Available under the MIT-0 license.'
+      RetentionPolicy: Retain
+
+  #
+  # Network
+  #
+  LambdaVpcSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Security group for Lambda Function
+      VpcId: !Ref VPCID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: !Ref RemoteAccessCIDR
+          Description: 'Lambda to VPC CIDR'
+
+  SecretManagerVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PrivateDnsEnabled: true
+      PolicyDocument: '{
+         "Version":"2012-10-17",
+         "Statement":[{
+           "Effect":"Allow",
+           "Principal": "*",
+           "Action": "*",
+           "Resource":"*"
+         }]
+      }'
+      SecurityGroupIds:
+        - !Ref LambdaVpcSecurityGroup
+      SubnetIds:
+        - !Ref Subnet1ID
+        - !Ref Subnet2ID
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.secretsmanager
+      VpcEndpointType: "Interface"
+      VpcId: !Ref VPCID
+
+
+Outputs:
+  MeterForecastPredictionApi:
+    Description: Prediction function.
+    Value: !Ref MeterForecastPredictionApi
+  AnomalyPredictionApi:
+    Description: Anomaly API.
+    Value: !Ref AnomalyPredictionApi

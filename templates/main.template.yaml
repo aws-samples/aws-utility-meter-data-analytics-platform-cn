@@ -1,0 +1,277 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Main Template to deploy AWS Quick Start for Utility meter data analytics in a new VPC. (qs-1r18anaju)
+Metadata:
+  QuickStartDocumentation:
+    EntrypointName: "Parameters for launching into a new VPC"
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Redshift Cluster Configuration
+        Parameters:
+          - MasterUsername
+          - MasterUserPassword
+          - ClusterName
+          - DBName
+          - RedshiftPort
+      - Label:
+          default: Network Configuration
+        Parameters:
+          - AvailabilityZones
+          - VPCCIDR
+          - PrivateSubnet1ACIDR
+          - PrivateSubnet2ACIDR
+          - RemoteAccessCIDR
+      - Label:
+          default: 'Glue Configurations'
+        Parameters:
+          - LandingzoneTransformer
+          - CreateLandingZoneS3Bucket
+          - LandingZoneS3BucketName
+          - NoOfMeters
+          - LandingzoneTransformer
+      - Label:
+          default: 'Quick Start Configuration'
+        Parameters:
+          - QSS3BucketName
+          - QSS3KeyPrefix
+          - QSS3BucketRegion
+    ParameterLabels:
+      MasterUsername:
+        default: Master username
+      MasterUserPassword:
+        default: Master user password
+      ClusterName:
+        default: Redshift cluster name
+      RedshiftPort:
+        default: Redshift port
+      DBName:
+        default: Redshift database name
+      PrivateSubnet1ACIDR:
+        default: Private subnet 1A CIDR
+      PrivateSubnet2ACIDR:
+        default: Private subnet 2A CIDR
+      VPCCIDR:
+        default: VPC CIDR
+      RemoteAccessCIDR:
+        default: Remote access CIDR block
+      AvailabilityZones:
+        default: Availability Zones
+      QSS3BucketName:
+        default: Quick Start S3 Bucket name
+      QSS3KeyPrefix:
+        default: Quick Start S3 Bucket Key Prefix
+      QSS3BucketRegion:
+        default: Quick Start S3 Bucket AWS Region
+      LandingzoneTransformer:
+        default: Transformer that reads the landing zone data
+      CreateLandingZoneS3Bucket:
+        default: Create landing zone bucket
+      LandingZoneS3BucketName:
+        default: Landing zone S3 bucket
+      NoOfMeters:
+        default: No. of meters
+      WithWeather:
+        default: Weather data Availability
+
+Resources:
+  VPC:
+    Type: 'AWS::CloudFormation::Stack'
+    Properties:
+      TemplateURL: !Sub
+        - https://${S3Bucket}.s3.${AWS::Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/aws-vpc.template.yaml
+        - S3Bucket: !If
+            - UsingDefaultBucket
+            - !Sub 'aws-quickstart-${AWS::Region}-aaron'
+            - !Ref 'QSS3BucketName'
+          S3Region: !If
+            - UsingDefaultBucket
+            - !Ref 'AWS::Region'
+            - !Ref 'QSS3BucketRegion'
+      Parameters:
+        AvailabilityZones: !Join
+          - ','
+          - !Ref 'AvailabilityZones'
+        PrivateSubnet1ACIDR: !Ref 'PrivateSubnet1ACIDR'
+        PrivateSubnet2ACIDR: !Ref 'PrivateSubnet2ACIDR'
+        VPCCIDR: !Ref VPCCIDR
+        NumberOfAZs: 2
+
+  Workload:
+    Type: 'AWS::CloudFormation::Stack'
+    Properties:
+      TemplateURL: !Sub
+        - https://${S3Bucket}.s3.${AWS::Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/workload.yml
+        - S3Bucket: !If
+            - UsingDefaultBucket
+            - !Sub 'aws-quickstart-${AWS::Region}-aaron'
+            - !Ref 'QSS3BucketName'
+          S3Region: !If
+            - UsingDefaultBucket
+            - !Ref 'AWS::Region'
+            - !Ref 'QSS3BucketRegion'
+      Parameters:
+        MasterUsername: !Ref MasterUsername
+        MasterUserPassword: !Ref MasterUserPassword
+        ClusterName: !Ref ClusterName
+        Subnet1ID: 
+          Fn::GetAtt: [VPC, Outputs.PrivateSubnet1AID]
+        Subnet2ID: 
+          Fn::GetAtt: [VPC, Outputs.PrivateSubnet2AID]
+        VPCID: 
+          Fn::GetAtt: [VPC, Outputs.VPCID]
+        RemoteAccessCIDR: !Ref RemoteAccessCIDR
+        LandingzoneTransformer: !Ref LandingzoneTransformer
+        CreateLandingZoneS3Bucket: !Ref CreateLandingZoneS3Bucket
+        LandingZoneS3BucketName: !Ref LandingZoneS3BucketName
+        QSS3BucketName: !Ref QSS3BucketName
+        QSS3KeyPrefix: !Ref QSS3KeyPrefix
+        QSS3BucketRegion: !Ref QSS3BucketRegion
+        DBName: !Ref DBName
+        RedshiftPort: !Ref RedshiftPort
+        VPCRouteTableId: !GetAtt VPC.Outputs.VPCRouteTable
+        AvailabilityZone: !Select
+        - '0'
+        - !Ref 'AvailabilityZones'
+        NoOfMeters: !Ref NoOfMeters
+        WithWeather: !Ref WithWeather
+
+Conditions:
+  UsingDefaultBucket: !Equals
+    - !Ref QSS3BucketName
+    - 'aws-quickstart-cn-northwest-1-aaron'
+
+Parameters:
+  MasterUsername:
+    Type: String
+    Description: Master user name for the Amazon Redshift cluster. The user name must be lowercase, begin with a letter, contain only alphanumeric characters, '_', '+', '.', '@', or '-', and be less than 128 characters.
+
+  MasterUserPassword:
+    Type: String
+    Description: Master user password for the Amazon Redshift cluster. The password must be 8 - 64 characters, contain at least one uppercase letter, at least one lowercase letter, and at least one number. It can only contain ASCII characters (ASCII codes 33-126), except ' (single quotation mark), " (double quotation mark), /, \, or @.
+    NoEcho: True
+  
+  ClusterName:
+    Type: String
+    Default: redshift-cluster-1
+    Description: Redshift cluster name
+
+  RemoteAccessCIDR:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: CIDR block from where access to the Redshift cluster is allowed
+
+  LandingzoneTransformer:
+    Type: String
+    Default: london
+    Description: Defines the Transformer for the input data in the Landing Zone
+    AllowedValues:
+      - default
+      - london
+  
+  CreateLandingZoneS3Bucket:
+    Type: String
+    Default: 'Yes'
+    Description: Select 'No' if you have an existing S3 bucket with raw meter data which you would like to use. Otherwise leave default value as 'Yes'. You must provide a value for 'Landing zone S3 bucket' parameter if you select 'No'.
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+  
+  LandingZoneS3BucketName:
+    Type: String
+    Default: ""
+    Description: (Conditional) You must provide a value if you select 'No' for 'Create Landing Zone bucket' parameter above.
+
+  QSS3BucketName:
+    Type: String
+    Default: aws-quickstart-cn-northwest-1-aaron
+    Description: AWS Quick Start S3 bucket name where the Quick Start assets are hosted
+  
+  QSS3KeyPrefix:
+    Type: String
+    Default: quickstart-aws-utility-meter-data-analytics-platform/
+    Description: S3 bucket key prefix for the AWS Quick Start assets
+  
+  QSS3BucketRegion:
+    Type: String
+    Description: AWS Region for AWS Quick Start S3 bucket
+    Default: cn-northwest-1
+  
+  DBName:
+    Type: String
+    Default: meter-data
+    Description: Redshift database name
+  
+  RedshiftPort:
+    Type: String
+    Default: 5439
+    Description: Redshift cluster port no.
+  
+  NoOfMeters:
+    Type: String
+    Description: Approximate range. of meters you have in your dataset, which needs to be processed by the pipeline. This is used to configure appropriate no. of DPUs for the Glue Job. Default value is good for sample data set or evaluation purpose. For production deployment with millions of meters, select '50001-and-more' from the list.
+    AllowedValues:
+      - "1-50000"
+      - "50001-and-more"
+    Default: "1-50000"
+
+  AvailabilityZones:
+    Description: >-
+      List of Availability Zones to use for the subnets in the VPC. Note: The logical
+      order is preserved and 2 zones must be provided unless the Third Availability Zone parameter
+      is specified, in which case 3 zones must be provided.
+    Type: List<AWS::EC2::AvailabilityZone::Name>
+  
+  PrivateSubnet1ACIDR:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-8]))$
+    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
+    Default: 10.0.0.0/19
+    Description: CIDR block for private subnet 1A located in Availability Zone 1
+    Type: String
+  
+  PrivateSubnet2ACIDR:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-8]))$
+    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
+    Default: 10.0.32.0/19
+    Description: CIDR block for private subnet 2A located in Availability Zone 2
+    Type: String
+  
+  VPCCIDR:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-8]))$
+    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
+    Default: 10.0.0.0/16
+    Description: CIDR block for the VPC.
+    Type: String
+  
+  WithWeather:
+    Type: Number
+    Default: 0
+    Description: >-
+      Enables or disables the use of weather data.
+      0 = weather data won't be used
+      1 = enable weather data use
+
+Outputs:
+  StackName:
+    Description: 'Stack name'
+    Value: !Sub '${AWS::StackName}'
+  RedshiftClusterEndpoint:
+    Description: Redshift cluster endpoint address with port
+    Value: !GetAtt Workload.Outputs.RedshiftClusterEndpoint
+  RedshiftEndpoint:
+    Description: Redshift endpoint address
+    Value: !GetAtt Workload.Outputs.RedshiftEndpoint
+  GlueWorkflowName:
+    Description: Glue workflow name
+    Value: !GetAtt Workload.Outputs.GlueWorkflowName
+  LandingZoneS3Bucket:
+    Description: Landing zone S3 bucket name
+    Value: !GetAtt Workload.Outputs.LandingZoneS3Bucket
+  CleanZoneS3Bucket:
+    Description: Clean zone S3 bucket name
+    Value: !GetAtt Workload.Outputs.CleanZoneS3Bucket
+  TempWorkflowS3Bucket:
+    Description: Clean zone S3 bucket name
+    Value: !GetAtt Workload.Outputs.TempWorkflowS3Bucket
+  BusinessZoneS3Bucket:
+    Description: Business zone S3 bucket name
+    Value: !GetAtt Workload.Outputs.BusinessZoneS3Bucket

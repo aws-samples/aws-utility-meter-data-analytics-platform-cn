@@ -1,0 +1,88 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Creates Glue tables"
+
+Resources:
+    GlueTableDaily:
+        Type: "AWS::Glue::Table"
+        Properties:
+            DatabaseName: !Ref DBName
+            CatalogId: !Ref "AWS::AccountId"
+            TableInput: 
+                Name: "daily"
+                TableType: "EXTERNAL_TABLE"
+                Parameters: 
+                    CrawlerSchemaDeserializerVersion: "1.0"
+                    CrawlerSchemaSerializerVersion: "1.0"
+                    classification: "parquet"
+                    compressionType: "none"
+                    typeOfData: "file"
+                StorageDescriptor: 
+                    Columns: 
+                      - 
+                        Name: "meter_id"
+                        Type: "string"
+                      - 
+                        Name: "obis_code"
+                        Type: "string"
+                      - 
+                        Name: "reading_date_time"
+                        Type: "timestamp"
+                      - 
+                        Name: "reading_value"
+                        Type: "double"
+                      -
+                        Name: "week_of_year"
+                        Type: "int"
+                      - 
+                        Name: "day_of_month"
+                        Type: "int"
+                      - 
+                        Name: "month"
+                        Type: "int"
+                      - 
+                        Name: "year"
+                        Type: "int"
+                      - 
+                        Name: "hour"
+                        Type: "int"
+                      - 
+                        Name: "minute"
+                        Type: "int"
+                    Location: !Sub "s3://${BusinessZoneS3Bucket}/daily/"
+                    InputFormat: "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
+                    OutputFormat: "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
+                    Compressed: false
+                    NumberOfBuckets: -1
+                    SerdeInfo: 
+                        SerializationLibrary: "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
+                        Parameters: 
+                            "serialization.format": "1"
+                    Parameters: 
+                        CrawlerSchemaDeserializerVersion: "1.0"
+                        CrawlerSchemaSerializerVersion: "1.0"
+                        classification: "parquet"
+                        compressionType: "none"
+                        typeOfData: "file"
+                    StoredAsSubDirectories: false
+                PartitionKeys: 
+                  - 
+                    Name: "reading_type"
+                    Type: "string"
+                  - 
+                    Name: "date_str"
+                    Type: "string"
+                Retention: 0
+
+Parameters:
+  BusinessZoneS3Bucket:
+    Type: String
+
+  LandingZoneS3Bucket:
+    Type: String
+  
+  CleanZoneS3Bucket:
+    Type: String
+
+  DBName:
+    Type: String
+    Default: meter-data
