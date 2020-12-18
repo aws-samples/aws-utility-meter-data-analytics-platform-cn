@@ -81,7 +81,7 @@ Resources:
         - https://${S3Bucket}.s3.${AWS::Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/aws-vpc.template.yaml
         - S3Bucket: !If
             - UsingDefaultBucket
-            - !Sub 'aws-quickstart-${AWS::Region}-aaron'
+            - !Sub 'aws-quickstart-${AWS::Region}'
             - !Ref 'QSS3BucketName'
           S3Region: !If
             - UsingDefaultBucket
@@ -103,7 +103,7 @@ Resources:
         - https://${S3Bucket}.s3.${AWS::Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/workload.yml
         - S3Bucket: !If
             - UsingDefaultBucket
-            - !Sub 'aws-quickstart-${AWS::Region}-aaron'
+            - !Sub 'aws-quickstart-${AWS::Region}'
             - !Ref 'QSS3BucketName'
           S3Region: !If
             - UsingDefaultBucket
@@ -138,7 +138,7 @@ Resources:
 Conditions:
   UsingDefaultBucket: !Equals
     - !Ref QSS3BucketName
-    - 'aws-quickstart-cn-northwest-1-aaron'
+    - 'aws-quickstart-cn-northwest-1'
 
 Parameters:
   MasterUsername:
@@ -183,7 +183,7 @@ Parameters:
 
   QSS3BucketName:
     Type: String
-    Default: aws-quickstart-cn-northwest-1-aaron
+    Default: aws-quickstart-cn-northwest-1
     Description: AWS Quick Start S3 bucket name where the Quick Start assets are hosted
   
   QSS3KeyPrefix:
