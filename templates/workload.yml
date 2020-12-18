@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: '2010-09-09'
 Transform: 'AWS::Serverless-2016-10-31'
 Description: "Workload template to deploy Meter data analytics platform in an existing VPC. (qs-1r18anahd)"
 Conditions:
-  UsingDefaultBucket: !Equals [!Ref QSS3BucketName, 'aws-quickstart-cn-northwest-1']
+  UsingDefaultBucket: !Equals [!Ref QSS3BucketName, 'aws-cn-quickstart-cn-northwest-1']
 Rules:
   LZS3BucketNameProvided:
     RuleCondition: !Equals [!Ref CreateLandingZoneS3Bucket, 'No']
@@ -281,7 +281,7 @@ Parameters:
 
   QSS3BucketName:
     Type: String
-    Default: aws-quickstart-cn-northwest-1
+    Default: aws-cn-quickstart-cn-northwest-1
     Description: AWS Quick Start S3 bucket name where the Quick Start assets are hosted
   
   QSS3KeyPrefix:

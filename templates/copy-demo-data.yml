@@ -119,8 +119,7 @@ Resources:
 Parameters:
   QSS3BucketName:
     AllowedPattern: ^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$
-    # Default: aws-quickstart
-    Default: aws-quickstart-cn-northwest-1
+    Default: aws-cn-quickstart-cn-northwest-1
     Type: String
   QSS3KeyPrefix:
     AllowedPattern: ^[0-9a-zA-Z-/]*$

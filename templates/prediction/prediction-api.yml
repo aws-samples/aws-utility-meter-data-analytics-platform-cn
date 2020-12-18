@@ -20,7 +20,7 @@ Parameters:
     ConstraintDescription: >-
       Quick Start bucket name can include numbers, lowercase letters, uppercase
       letters, and hyphens (-). It cannot start or end with a hyphen (-).
-    Default: aws-quickstart
+    Default: aws-cn-quickstart-cn-northwest-1
     Description: >-
       S3 bucket name for the Quick Start assets.
       Only change this value if you customize or extend the Quick Start for your own use.
