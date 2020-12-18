@@ -11,7 +11,7 @@ Parameters:
     Type: String
   QSS3KeyPrefix:
     AllowedPattern: ^[0-9a-zA-Z-/]*$
-    Default: quickstart-aws-utility-meter-data-analytics-platform/
+    Default: quickstart-aws-utility-meter-data-analytics-platform-cn/
     Type: String
 
 

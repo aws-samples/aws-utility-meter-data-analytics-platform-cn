@@ -286,7 +286,7 @@ Parameters:
   
   QSS3KeyPrefix:
     Type: String
-    Default: quickstart-aws-utility-meter-data-analytics-platform/
+    Default: quickstart-aws-utility-meter-data-analytics-platform-cn/
     Description: S3 bucket key prefix for the AWS Quick Start assets
   
   QSS3BucketRegion:
