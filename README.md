@@ -1,11 +1,8 @@
-## My Project
+## Utility Meter Data Analytics Platform
 
-TODO: Fill this README out!
+For architectural details, step-by-step instructions, and customization options, see the deployment guide.
 
-Be sure to:
-
-* Change the title in this README
-* Edit your repository description on GitHub
+To post feedback, submit feature ideas, or report bugs, use the Issues section of this GitHub repo.
 
 ## Security
 
