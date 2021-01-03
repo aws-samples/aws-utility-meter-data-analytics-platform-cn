@@ -46,7 +46,7 @@
 | AWS服务 | 该方案使用配额 | 
 | ------------ | ------------ |
 | VPCs | 1 | 
-| AWS Identity and Access Management (IAM) roles | 7 ｜ 
+| AWS Identity and Access Management (IAM) roles | 7 |  
 | Amazon S3 buckets | 6 | 
 | AWS Glue crawlers | 4 | 
 | AWS Glue jobs | 3 | 
