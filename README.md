@@ -1,3 +1,33 @@
+- [智能电表数据分析平台](#智能电表数据分析平台)
+  - [背景](#背景)
+  - [解决方案描述](#解决方案描述)
+  - [使用场景](#使用场景)
+  - [系统架构](#系统架构)
+    - [架构图](#架构图)
+    - [部署服务](#部署服务)
+  - [部署说明](#部署说明)
+    - [部署前提](#部署前提)
+  - [快速部署](#快速部署)
+    - [启动AWS CloudFormation堆栈](#启动aws-cloudformation堆栈)
+    - [指定堆栈细节](#指定堆栈细节)
+    - [登录到您的账户](#登录到您的账户)
+    - [配置堆栈选项](#配置堆栈选项)
+    - [审核](#审核)
+  - [开始使用](#开始使用)
+    - [下载电表能耗数据集](#下载电表能耗数据集)
+    - [将数据集上传至S3桶](#将数据集上传至s3桶)
+    - [增加天气数据集（可选，默认不添加）](#增加天气数据集可选默认不添加)
+    - [触发AWS Step Function工作流](#触发aws-step-function工作流)
+    - [查看已训练模型](#查看已训练模型)
+    - [重新训练模型（可选）](#重新训练模型可选)
+    - [调用API](#调用api)
+  - [FAQ](#faq)
+  - [附录](#附录)
+    - [CloudFormation堆栈参数](#cloudformation堆栈参数)
+    - [数据集格式](#数据集格式)
+  - [证书](#证书)
+  - [安全性](#安全性)
+
 # 智能电表数据分析平台
 
 ## 背景
@@ -91,9 +121,6 @@
 等待约30 分钟，堆栈创建完成后您可以看到父堆栈和嵌套堆栈的创建状态，点击【输出】标签栏您将看到创建的资源细节。
 
 ![6](./image/6.png "6")
-
-## 安全性
-See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
 
 ## 开始使用
 ### 下载电表能耗数据集
@@ -424,3 +451,5 @@ ETL后数据集格式如下：
 ## 证书
 This project is licensed under the Apache-2.0 License.
 
+## 安全性
+See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
