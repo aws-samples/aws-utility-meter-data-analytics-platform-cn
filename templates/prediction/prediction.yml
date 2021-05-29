@@ -60,11 +60,47 @@ Globals:
         With_weather_data: !Ref WithWeather
 
 Resources:
+
+  PredictionCMK:
+    Type: AWS::KMS::Key
+    Properties:
+      KeyPolicy:
+        Version: '2012-10-17'
+        Id: key-prediction
+        Statement:
+        - Sid: Enable IAM User Permissions
+          Effect: Allow
+          Principal:
+            AWS:
+              Fn::Join:
+              - ''
+              - - 'arn:aws:iam::'
+                - Ref: AWS::AccountId
+                - :root
+          Action: kms:*
+          Resource: '*'
+
   AthenaQueryBucket:
     Type: AWS::S3::Bucket
+    Properties:
+    BucketEncryption:
+      BucketKeyEnabled: True
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: 'aws:kms'
+              KMSMasterKeyID: !Ref PredictionCMK
 
   WorkingBucket:
     Type: AWS::S3::Bucket
+    Properties:
+    BucketEncryption:
+      BucketKeyEnabled: True
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: 'aws:kms'
+              KMSMasterKeyID: !Ref PredictionCMK
 
   MlPipelineTriggerStateMachine:
     Type: 'AWS::Serverless::StateMachine'

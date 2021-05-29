@@ -591,21 +591,75 @@ Resources:
         - "arn:aws-cn:iam::aws:policy/service-role/AWSGlueServiceRole"
         - "arn:aws-cn:iam::aws:policy/AmazonRedshiftFullAccess"
 
+  GlueCMK:
+    Type: AWS::KMS::Key
+    Properties:
+      KeyPolicy:
+        Version: '2012-10-17'
+        Id: key-gluecmk
+        Statement:
+        - Sid: Enable IAM User Permissions
+          Effect: Allow
+          Principal:
+            AWS:
+              Fn::Join:
+              - ''
+              - - 'arn:aws:iam::'
+                - Ref: AWS::AccountId
+                - :root
+          Action: kms:*
+          Resource: '*'
+
   BusinessZoneS3Bucket:
     Type: "AWS::S3::Bucket"
+    Properties:
+      BucketKeyEnabled: True
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: 'aws:kms'
+              KMSMasterKeyID: !Ref GlueCMK
 
   LandingZoneS3Bucket:
     Type: "AWS::S3::Bucket"
     Condition: CreateLZS3BucketCondition
+    Properties:
+      BucketKeyEnabled: True
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: 'aws:kms'
+              KMSMasterKeyID: !Ref GlueCMK
 
   CleanZoneS3Bucket:
     Type: "AWS::S3::Bucket"
+    Properties:
+      BucketKeyEnabled: True
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: 'aws:kms'
+              KMSMasterKeyID: !Ref GlueCMK
 
   TempWorkflowS3Bucket:
     Type: "AWS::S3::Bucket"
+    Properties:
+      BucketKeyEnabled: True
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: 'aws:kms'
+              KMSMasterKeyID: !Ref GlueCMK
 
   CisS3Bucket:
     Type: "AWS::S3::Bucket"
+    Properties:
+      BucketKeyEnabled: True
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: 'aws:kms'
+              KMSMasterKeyID: !Ref GlueCMK
 
   GlueDatabase:
     Type: "AWS::Glue::Database"
