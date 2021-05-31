@@ -614,6 +614,8 @@ Resources:
     Type: "AWS::S3::Bucket"
     Properties:
       BucketKeyEnabled: True
+      VersioningConfiguration:
+        Status: Enabled
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -625,6 +627,8 @@ Resources:
     Condition: CreateLZS3BucketCondition
     Properties:
       BucketKeyEnabled: True
+      VersioningConfiguration:
+        Status: Enabled
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -635,6 +639,8 @@ Resources:
     Type: "AWS::S3::Bucket"
     Properties:
       BucketKeyEnabled: True
+      VersioningConfiguration:
+        Status: Enabled
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -645,6 +651,8 @@ Resources:
     Type: "AWS::S3::Bucket"
     Properties:
       BucketKeyEnabled: True
+      VersioningConfiguration:
+        Status: Enabled
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -655,6 +663,8 @@ Resources:
     Type: "AWS::S3::Bucket"
     Properties:
       BucketKeyEnabled: True
+      VersioningConfiguration:
+        Status: Enabled
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
