@@ -1,4 +1,4 @@
 boto3==1.14.9
 pandas==1.0.5
-numpy==1.19.0
+numpy==1.22.0
 PyAthena==1.10.7
